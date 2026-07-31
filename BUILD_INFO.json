@@ -1,0 +1,9 @@
+{
+  "component": "local_paymentunlockassign",
+  "version": "1.0.17",
+  "numeric_version": "2026032001117",
+  "build_id": "pua17w01x017",
+  "build_timestamp": "2026-04-01T07:00:00.000Z",
+  "folder": "local_paymentunlockassign",
+  "verification": "SYNC_FIX_savepoint_and_BUILD_INFO_v1_0_15_to_v1_0_17"
+}

@@ -1,0 +1,116 @@
+<?xml version="1.0" encoding="UTF-8" ?>
+<XMLDB PATH="local/paymentunlockassign/db" VERSION="20260707" COMMENT="XMLDB file for local_paymentunlockassign"
+    xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+    xsi:noNamespaceSchemaLocation="../../../lib/xmldb/xmldb.xsd">
+  <TABLES>
+
+    <TABLE NAME="local_payunlock_settings" COMMENT="Per-assignment payment unlock configuration">
+      <FIELDS>
+        <FIELD NAME="id" TYPE="int" LENGTH="10" NOTNULL="true" SEQUENCE="true"/>
+        <FIELD NAME="assignid" TYPE="int" LENGTH="10" NOTNULL="true"/>
+        <FIELD NAME="courseid" TYPE="int" LENGTH="10" NOTNULL="true"/>
+        <FIELD NAME="enabled" TYPE="int" LENGTH="1" NOTNULL="true" DEFAULT="0"/>
+        <FIELD NAME="lockdate" TYPE="int" LENGTH="10" NOTNULL="false" COMMENT="Unix timestamp custom override; 0/null = use lockdatesource"/>
+        <FIELD NAME="lockdatesource" TYPE="char" LENGTH="20" NOTNULL="true" DEFAULT="cutoffdate" COMMENT="cutoffdate or duedate — which assignment date triggers the lock when no custom lockdate is set"/>
+        <FIELD NAME="hidepassing" TYPE="int" LENGTH="1" NOTNULL="true" DEFAULT="1" COMMENT="1 = suppress Reopen button for students who already have a passing grade"/>
+        <FIELD NAME="attempt1fee" TYPE="number" LENGTH="10" DECIMALS="2" NOTNULL="true" DEFAULT="75.00"/>
+        <FIELD NAME="attempt2fee" TYPE="number" LENGTH="10" DECIMALS="2" NOTNULL="true" DEFAULT="125.00"/>
+        <FIELD NAME="attempt3mode" TYPE="char" LENGTH="20" NOTNULL="true" DEFAULT="blocked" COMMENT="blocked or approval"/>
+        <FIELD NAME="reopendays" TYPE="int" LENGTH="4" NOTNULL="true" DEFAULT="7"/>
+        <FIELD NAME="currency" TYPE="char" LENGTH="10" NOTNULL="true" DEFAULT="AUD"/>
+        <FIELD NAME="timecreated" TYPE="int" LENGTH="10" NOTNULL="true" DEFAULT="0"/>
+        <FIELD NAME="timemodified" TYPE="int" LENGTH="10" NOTNULL="true" DEFAULT="0"/>
+      </FIELDS>
+      <KEYS>
+        <KEY NAME="primary" TYPE="primary" FIELDS="id"/>
+        <KEY NAME="assignid_unique" TYPE="unique" FIELDS="assignid"/>
+      </KEYS>
+    </TABLE>
+
+    <TABLE NAME="local_payunlock_access" COMMENT="Per-student per-assignment access records">
+      <FIELDS>
+        <FIELD NAME="id" TYPE="int" LENGTH="10" NOTNULL="true" SEQUENCE="true"/>
+        <FIELD NAME="studentid" TYPE="int" LENGTH="10" NOTNULL="true"/>
+        <FIELD NAME="assignid" TYPE="int" LENGTH="10" NOTNULL="true"/>
+        <FIELD NAME="status" TYPE="char" LENGTH="20" NOTNULL="true" DEFAULT="available" COMMENT="available, locked, reopened, submitted"/>
+        <FIELD NAME="currentattempt" TYPE="int" LENGTH="4" NOTNULL="true" DEFAULT="0"/>
+        <FIELD NAME="unlockexpiry" TYPE="int" LENGTH="10" NOTNULL="false"/>
+        <FIELD NAME="approvalgranted" TYPE="int" LENGTH="1" NOTNULL="true" DEFAULT="0"/>
+        <FIELD NAME="submittedat" TYPE="int" LENGTH="10" NOTNULL="false"/>
+        <FIELD NAME="lastlockedat" TYPE="int" LENGTH="10" NOTNULL="false"/>
+        <FIELD NAME="timecreated" TYPE="int" LENGTH="10" NOTNULL="true" DEFAULT="0"/>
+        <FIELD NAME="timemodified" TYPE="int" LENGTH="10" NOTNULL="true" DEFAULT="0"/>
+      </FIELDS>
+      <KEYS>
+        <KEY NAME="primary" TYPE="primary" FIELDS="id"/>
+        <KEY NAME="student_assign_unique" TYPE="unique" FIELDS="studentid,assignid"/>
+      </KEYS>
+      <INDEXES>
+        <INDEX NAME="studentid" UNIQUE="false" FIELDS="studentid"/>
+        <INDEX NAME="assignid" UNIQUE="false" FIELDS="assignid"/>
+      </INDEXES>
+    </TABLE>
+
+    <TABLE NAME="local_payunlock_payments" COMMENT="Payment records for unlock fees">
+      <FIELDS>
+        <FIELD NAME="id" TYPE="int" LENGTH="10" NOTNULL="true" SEQUENCE="true"/>
+        <FIELD NAME="studentid" TYPE="int" LENGTH="10" NOTNULL="true"/>
+        <FIELD NAME="assignid" TYPE="int" LENGTH="10" NOTNULL="true"/>
+        <FIELD NAME="attemptnumber" TYPE="int" LENGTH="4" NOTNULL="true" DEFAULT="1"/>
+        <FIELD NAME="amount" TYPE="number" LENGTH="10" DECIMALS="2" NOTNULL="true" DEFAULT="0.00"/>
+        <FIELD NAME="currency" TYPE="char" LENGTH="10" NOTNULL="true" DEFAULT="AUD"/>
+        <FIELD NAME="stripesessionid" TYPE="char" LENGTH="255" NOTNULL="false"/>
+        <FIELD NAME="stripepaymentintentid" TYPE="char" LENGTH="255" NOTNULL="false"/>
+        <FIELD NAME="status" TYPE="char" LENGTH="20" NOTNULL="true" DEFAULT="pending" COMMENT="pending, success, failed"/>
+        <FIELD NAME="receipturl" TYPE="text" NOTNULL="false"/>
+        <FIELD NAME="invoicereference" TYPE="char" LENGTH="100" NOTNULL="false"/>
+        <FIELD NAME="timecreated" TYPE="int" LENGTH="10" NOTNULL="true" DEFAULT="0"/>
+        <FIELD NAME="timepaid" TYPE="int" LENGTH="10" NOTNULL="false"/>
+      </FIELDS>
+      <KEYS>
+        <KEY NAME="primary" TYPE="primary" FIELDS="id"/>
+      </KEYS>
+      <INDEXES>
+        <INDEX NAME="studentid" UNIQUE="false" FIELDS="studentid"/>
+        <INDEX NAME="assignid" UNIQUE="false" FIELDS="assignid"/>
+        <INDEX NAME="stripesessionid" UNIQUE="false" FIELDS="stripesessionid"/>
+      </INDEXES>
+    </TABLE>
+
+    <TABLE NAME="local_payunlock_overrides" COMMENT="Admin manual overrides">
+      <FIELDS>
+        <FIELD NAME="id" TYPE="int" LENGTH="10" NOTNULL="true" SEQUENCE="true"/>
+        <FIELD NAME="studentid" TYPE="int" LENGTH="10" NOTNULL="true"/>
+        <FIELD NAME="assignid" TYPE="int" LENGTH="10" NOTNULL="true"/>
+        <FIELD NAME="adminid" TYPE="int" LENGTH="10" NOTNULL="true"/>
+        <FIELD NAME="overridetype" TYPE="char" LENGTH="30" NOTNULL="true" COMMENT="reopen, extend, lock, approve"/>
+        <FIELD NAME="reason" TYPE="text" NOTNULL="false"/>
+        <FIELD NAME="newexpiry" TYPE="int" LENGTH="10" NOTNULL="false"/>
+        <FIELD NAME="timecreated" TYPE="int" LENGTH="10" NOTNULL="true" DEFAULT="0"/>
+      </FIELDS>
+      <KEYS>
+        <KEY NAME="primary" TYPE="primary" FIELDS="id"/>
+      </KEYS>
+    </TABLE>
+
+    <TABLE NAME="local_payunlock_audit" COMMENT="Audit log for all access events">
+      <FIELDS>
+        <FIELD NAME="id" TYPE="int" LENGTH="10" NOTNULL="true" SEQUENCE="true"/>
+        <FIELD NAME="userid" TYPE="int" LENGTH="10" NOTNULL="false"/>
+        <FIELD NAME="studentid" TYPE="int" LENGTH="10" NOTNULL="false"/>
+        <FIELD NAME="assignid" TYPE="int" LENGTH="10" NOTNULL="false"/>
+        <FIELD NAME="eventtype" TYPE="char" LENGTH="60" NOTNULL="true"/>
+        <FIELD NAME="eventdata" TYPE="text" NOTNULL="false"/>
+        <FIELD NAME="timecreated" TYPE="int" LENGTH="10" NOTNULL="true" DEFAULT="0"/>
+      </FIELDS>
+      <KEYS>
+        <KEY NAME="primary" TYPE="primary" FIELDS="id"/>
+      </KEYS>
+      <INDEXES>
+        <INDEX NAME="studentid" UNIQUE="false" FIELDS="studentid"/>
+        <INDEX NAME="assignid" UNIQUE="false" FIELDS="assignid"/>
+      </INDEXES>
+    </TABLE>
+
+  </TABLES>
+</XMLDB>

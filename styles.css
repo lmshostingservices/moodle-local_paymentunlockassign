@@ -1,0 +1,104 @@
+.payunlock-container {
+    max-width: 860px;
+    margin: 0 auto;
+    padding: 1.5rem 1rem;
+}
+
+.payunlock-card {
+    background: #fff;
+    border: 1px solid #dee2e6;
+    border-radius: 6px;
+    padding: 1.5rem;
+    margin-bottom: 1.5rem;
+}
+
+.payunlock-header-card {
+    border-top: 4px solid #0077b6;
+}
+
+.payunlock-header-card h2 {
+    margin: 0 0 0.25rem;
+    font-size: 1.4rem;
+}
+
+.payunlock-course {
+    color: #6c757d;
+    margin: 0;
+}
+
+.payunlock-payment-card {
+    border-top: 4px solid #dc3545;
+}
+
+.payunlock-fee {
+    font-size: 1.5rem;
+    font-weight: bold;
+    color: #0077b6;
+}
+
+.payunlock-duration {
+    color: #6c757d;
+    font-size: 0.9rem;
+}
+
+.payunlock-pay-btn {
+    font-size: 1.1rem;
+    padding: 0.6rem 2rem;
+    margin-top: 0.5rem;
+}
+
+.payunlock-status-badge {
+    font-size: 1rem;
+    padding: 0.35rem 0.75rem;
+}
+
+.payunlock-actions {
+    margin-top: 1rem;
+}
+
+.payunlock-form-table td {
+    padding: 0.5rem;
+    vertical-align: middle;
+}
+
+.payunlock-form-table td:first-child {
+    font-weight: 500;
+    width: 220px;
+}
+
+.payunlock-revenue-summary {
+    display: flex;
+    gap: 1.5rem;
+    margin-bottom: 1.5rem;
+    flex-wrap: wrap;
+}
+
+.payunlock-revenue-item {
+    background: #f1f9ff;
+    border: 1px solid #bee3f8;
+    border-radius: 6px;
+    padding: 1rem 1.5rem;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    gap: 0.25rem;
+}
+
+.payunlock-revenue-item strong {
+    font-size: 1.5rem;
+    color: #0077b6;
+}
+
+.payunlock-revenue-item span {
+    font-size: 0.85rem;
+    color: #6c757d;
+}
+
+.payunlock-access-table td {
+    vertical-align: middle;
+}
+
+.payunlock-ov-btn {
+    margin: 2px;
+    white-space: nowrap;
+}
