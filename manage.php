@@ -1,4 +1,12 @@
 <?php
+/**
+ * local_paymentunlockassign file.
+ *
+ * @package    local_paymentunlockassign
+ * @copyright  2026 LMS-Labs
+ * @license    http://www.gnu.org/licenses/gpl-3.0.html GNU GPL v3 or later
+ */
+
 // This file is part of Moodle - http://moodle.org/
 //
 // Moodle is free software: you can redistribute it and/or modify
@@ -285,10 +293,10 @@ if ($tab === 'assignments') {
         // a Moodle debug warning ("Scripts must use $PAGE->requires->js_init_code").
         // Replace with the correct Moodle API so the page passes strict mode checks.
         $js_lockdate = <<<'JSCODE'
-require([], function() {
+require([], function () {
     var f = document.querySelector("form");
     if (!f) { return; }
-    f.addEventListener("submit", function() {
+    f.addEventListener("submit", function () {
         var picker = document.getElementById("lockdate_picker");
         var hidden = document.getElementById("lockdate_unix");
         if (picker && hidden) {

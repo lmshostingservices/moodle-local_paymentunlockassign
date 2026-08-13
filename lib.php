@@ -11,6 +11,9 @@ defined('MOODLE_INTERNAL') || die();
 /**
  * Returns true if the plugin is globally enabled via site settings.
  * Defaults to enabled (returns true) if the config key has not been saved yet.
+ * @package    local_paymentunlockassign
+ * @copyright  2026 LMS-Labs
+ * @license    http://www.gnu.org/licenses/gpl-3.0.html GNU GPL v3 or later
  */
 function local_paymentunlockassign_is_enabled() {
     $val = get_config('local_paymentunlockassign', 'enabled');

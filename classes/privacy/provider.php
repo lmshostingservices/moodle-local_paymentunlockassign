@@ -1,4 +1,12 @@
 <?php
+/**
+ * local_paymentunlockassign file.
+ *
+ * @package    local_paymentunlockassign
+ * @copyright  2026 LMS-Labs
+ * @license    http://www.gnu.org/licenses/gpl-3.0.html GNU GPL v3 or later
+ */
+
 // This file is part of Moodle - http://moodle.org/
 //
 // Moodle is free software: you can redistribute it and/or modify
@@ -20,7 +28,6 @@ class provider implements
     \core_privacy\local\metadata\provider,
     \core_privacy\local\request\plugin\provider,
     \core_privacy\local\request\core_userlist_provider {
-
     public static function get_metadata(collection $collection): collection {
         $collection->add_database_table(
             'local_payunlock_access',

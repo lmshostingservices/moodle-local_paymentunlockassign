@@ -29,7 +29,6 @@ namespace local_paymentunlockassign\hook;
  * @license   http://www.gnu.org/copyleft/gpl.html GNU GPL v3 or later
  */
 class listener {
-
     /**
      * Redirect locked students away from the assignment submission form.
      *
@@ -298,7 +297,7 @@ class listener {
         // bypass the lock by clicking it directly — BUG-LOCK-INSTANT fix layer 3.
         $encoded = json_encode($html);
         $js = <<<JS
-require([], function() {
+require([], function () {
     function hideAddSubmissionButtons() {
         // Hide all native Moodle "Add submission" / "Edit submission" buttons.
         // Covers Moodle 4.0-4.5 theme variants (Boost, Classic, child themes).
@@ -309,8 +308,8 @@ require([], function() {
             '.submissionlinks button',
             'form[action*="editsubmission"] button[type="submit"]',
         ];
-        selectors.forEach(function(sel) {
-            document.querySelectorAll(sel).forEach(function(el) {
+        selectors.forEach(function (sel) {
+            document.querySelectorAll(sel).forEach(function (el) {
                 el.style.display = 'none';
             });
         });
