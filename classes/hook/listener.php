@@ -26,7 +26,7 @@ namespace local_paymentunlockassign\hook;
  *
  * @package   local_paymentunlockassign
  * @copyright 2026 Essay Grader AI
- * @license   http://www.gnu.org/copyleft/gpl.html GNU GPL v3 or later
+ * @license   https://www.gnu.org/copyleft/gpl.html GNU GPL v3 or later
  */
 class listener {
     /**
@@ -85,8 +85,8 @@ class listener {
         if (!$cm) {
             return;
         }
-        $assign_record = $DB->get_record('assign', ['id' => $cm->instance]);
-        if (!$assign_record) {
+        $assignrecord = $DB->get_record('assign', ['id' => $cm->instance]);
+        if (!$assignrecord) {
             return;
         }
 
@@ -95,39 +95,16 @@ class listener {
         // Previously only the base {assign} row was read, so group-override-driven
         // assignments (base dates = 0) were evaluated against zero dates — combined with
         // FIX-PUA-NODATES this permanently locked every student on such assignments.
-        $dates = local_paymentunlockassign_get_effective_dates($assign_record, $USER->id, $cm->course);
+        $dates = local_paymentunlockassign_get_effective_dates($assignrecord, $USER->id, $cm->course);
 
         $access   = local_paymentunlockassign_get_or_create_access($USER->id, $cmid);
         $lockdate = local_paymentunlockassign_get_lockdate($dates, $settings);
         $now      = time();
         $action   = optional_param('action', '', PARAM_ALPHA);
 
-        // FIX-PUA-FREEWINDOW (v1.1.1): Student is in the window between the assignment
-        // due date and the cut-off date. The plugin hasn't locked them yet (status =
-        // 'available'), but Moodle's "Prevent late submissions" setting hides the
-        // "Add submission" button after the due date. Fix: create a personal Moodle
-        // override extending the student's due date to the cut-off date so Moodle
-        // shows the button. This fires on EVERY view request (not just editsubmission)
-        // so the button is visible as soon as the student opens the assignment page.
-        // Uses $dates (effective dates) so group-override deadlines are respected.
-        $status = local_paymentunlockassign_derive_status($access, $lockdate, $now);
-        if ($status === 'available'
-            && !empty($dates->duedate)
-            && $now > (int)$dates->duedate
-            && !empty($dates->cutoffdate)
-            && $now < (int)$dates->cutoffdate
-        ) {
-            local_paymentunlockassign_ensure_free_window_override(
-                $cmid,
-                $USER->id,
-                (int)$dates->cutoffdate
-            );
-            // Override is in place (existing or just created). Let the request through.
-            // NOTE: No redirect here — before_http_headers fires before mod_assign builds
-            // its renderer state, so the override written above is visible to mod_assign
-            // in the same request. A redirect would risk an infinite loop.
-            return;
-        }
+        // FIX-PUA-NOFREEWINDOW (v1.2.7): the free-window user-override creation that
+        // used to run here on every page view has been removed. Moodle core already shows
+        // "Add submission" until the cut-off date.
 
         // LOCKED path: only redirect on editsubmission attempts.
         if ($action !== 'editsubmission') {
@@ -208,19 +185,14 @@ class listener {
             return;
         }
 
-        // Plugin must be credit-unlocked on this site (result is cached per-request).
-        if (!local_paymentunlockassign_check_unlock()) {
-            return;
-        }
-
         // Load the assignment record.
-        $assign_record = $DB->get_record('assign', ['id' => $cm->instance]);
-        if (!$assign_record) {
+        $assignrecord = $DB->get_record('assign', ['id' => $cm->instance]);
+        if (!$assignrecord) {
             return;
         }
 
         // FIX-PUA-OVERRIDES (v1.2.0): Resolve this student's effective dates.
-        $dates = local_paymentunlockassign_get_effective_dates($assign_record, $USER->id, $cm->course);
+        $dates = local_paymentunlockassign_get_effective_dates($assignrecord, $USER->id, $cm->course);
 
         // Get or create the student's access record.
         $access = local_paymentunlockassign_get_or_create_access($USER->id, $cm->id);
@@ -235,26 +207,33 @@ class listener {
             return;
         }
 
+        // Plugin must be credit-unlocked on this site. FIX-PUA-LICENCECACHE (v1.2.7):
+        // checked only when the paywall would actually be shown, and the result is
+        // cached site-wide, so normal page views never wait on lms-labs.com.
+        if (!local_paymentunlockassign_check_unlock()) {
+            return;
+        }
+
         // Determine next attempt number and fee.
-        $next_attempt = (int)$access->currentattempt + 1;
-        $fee      = ($next_attempt === 1) ? (float)$settings->attempt1fee : (float)$settings->attempt2fee;
+        $nextattempt = (int)$access->currentattempt + 1;
+        $fee      = ($nextattempt === 1) ? (float)$settings->attempt1fee : (float)$settings->attempt2fee;
         $currency = !empty($settings->currency) ? $settings->currency : 'AUD';
 
         // Check third-attempt policy.
         $blocked     = false;
-        $blocked_msg = '';
-        if ($next_attempt >= 3) {
+        $blockedmsg = '';
+        if ($nextattempt >= 3) {
             if ($settings->attempt3mode === 'blocked') {
                 $blocked     = true;
-                $blocked_msg = get_string('attempt3_blocked_msg', 'local_paymentunlockassign');
-            } elseif ($settings->attempt3mode === 'approval' && !$access->approvalgranted) {
+                $blockedmsg = get_string('attempt3_blocked_msg', 'local_paymentunlockassign');
+            } else if ($settings->attempt3mode === 'approval' && !$access->approvalgranted) {
                 $blocked     = true;
-                $blocked_msg = get_string('attempt3_approval_msg', 'local_paymentunlockassign');
+                $blockedmsg = get_string('attempt3_approval_msg', 'local_paymentunlockassign');
             }
         }
 
         // Build the student payment page URL.
-        $student_url = (new \moodle_url('/local/paymentunlockassign/student.php', [
+        $studenturl = (new \moodle_url('/local/paymentunlockassign/student.php', [
             'assignid' => $cm->id,
             'courseid' => $cm->course,
         ]))->out(false);
@@ -270,24 +249,24 @@ class listener {
                   . ' style="display:flex;align-items:center;gap:10px;margin-bottom:1rem;">'
                   . $icon
                   . '<span><strong>' . get_string('status_locked', 'local_paymentunlockassign') . '</strong>'
-                  . ' &mdash; ' . htmlspecialchars($blocked_msg) . '</span>'
+                  . ' &mdash; ' . htmlspecialchars($blockedmsg) . '</span>'
                   . '</div>';
         } else {
             // Show the "Reopen Assignment" button with the fee.
-            $fee_str  = htmlspecialchars($currency) . ' $' . number_format($fee, 2);
-            $btn_text = htmlspecialchars(get_string('reopen_assignment', 'local_paymentunlockassign'))
-                      . ' &mdash; ' . $fee_str;
+            $feestr  = htmlspecialchars($currency) . ' $' . number_format($fee, 2);
+            $btntext = htmlspecialchars(get_string('reopen_assignment', 'local_paymentunlockassign'))
+                      . ' &mdash; ' . $feestr;
             $notice   = htmlspecialchars(get_string('assignment_locked_notice', 'local_paymentunlockassign'));
-            $lock_icon = '<svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24"'
+            $lockicon = '<svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24"'
                   . ' fill="none" stroke="currentColor" stroke-width="2" style="flex-shrink:0;">'
                   . '<rect x="3" y="11" width="18" height="11" rx="2" ry="2"/>'
                   . '<path d="M7 11V7a5 5 0 0 1 10 0v4"/></svg>';
             $html = '<div class="payunlock-assign-notice alert alert-warning" role="alert"'
                   . ' style="display:flex;align-items:center;flex-wrap:wrap;gap:12px;margin-bottom:1rem;">'
                   . '<span style="display:flex;align-items:center;gap:8px;flex:1;min-width:200px;">'
-                  . $lock_icon . '<span>' . $notice . '</span></span>'
-                  . '<a href="' . $student_url . '" class="btn btn-warning payunlock-reopen-btn"'
-                  . ' style="white-space:nowrap;">' . $btn_text . '</a>'
+                  . $lockicon . '<span>' . $notice . '</span></span>'
+                  . '<a href="' . $studenturl . '" class="btn btn-warning payunlock-reopen-btn"'
+                  . ' style="white-space:nowrap;">' . $btntext . '</a>'
                   . '</div>';
         }
 
@@ -312,6 +291,14 @@ require([], function () {
             document.querySelectorAll(sel).forEach(function (el) {
                 el.style.display = 'none';
             });
+        });
+        // FIX-PUA-HIDEBTN (v1.2.7): Moodle 4.x/5.x render "Add submission" /
+        // "Edit submission" as a single_button GET form whose action is carried in a
+        // hidden input (name="action" value="editsubmission"), not in the form URL,
+        // so none of the selectors above matched it. Hide the whole button wrapper.
+        document.querySelectorAll('form input[name="action"][value="editsubmission"]').forEach(function (inp) {
+            var wrap = inp.closest('.singlebutton') || inp.closest('form');
+            if (wrap) { wrap.style.display = 'none'; }
         });
     }
 

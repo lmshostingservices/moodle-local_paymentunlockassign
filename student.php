@@ -1,12 +1,4 @@
 <?php
-/**
- * local_paymentunlockassign file.
- *
- * @package    local_paymentunlockassign
- * @copyright  2026 LMS-Labs
- * @license    http://www.gnu.org/licenses/gpl-3.0.html GNU GPL v3 or later
- */
-
 // This file is part of Moodle - http://moodle.org/
 //
 // Moodle is free software: you can redistribute it and/or modify
@@ -14,16 +6,28 @@
 // the Free Software Foundation, either version 3 of the License, or
 // (at your option) any later version.
 //
-// Student payment page - students visit this page when their assignment is locked
-// to view their status and make a payment to reopen.
-// URL: /local/paymentunlockassign/student.php?assignid=<cmid>&courseid=<courseid>
+// Moodle is distributed in the hope that it will be useful,
+// but WITHOUT ANY WARRANTY; without even the implied warranty of
+// MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+// GNU General Public License for more details.
+//
+// You should have received a copy of the GNU General Public License
+// along with Moodle.  If not, see <https://www.gnu.org/licenses/>.
+
+/**
+ * local_paymentunlockassign file.
+ *
+ * @package    local_paymentunlockassign
+ * @copyright  2026 LMS-Labs
+ * @license    https://www.gnu.org/copyleft/gpl.html GNU GPL v3 or later
+ */
 
 require_once(__DIR__ . '/../../config.php');
 require_once(__DIR__ . '/lib.php');
 
 require_login();
 
-$assignid = required_param('assignid', PARAM_INT); // course module id
+$assignid = required_param('assignid', PARAM_INT); // Course module id.
 $courseid = optional_param('courseid', 0, PARAM_INT);
 $payment  = optional_param('payment', '', PARAM_ALPHA);
 $action   = optional_param('action', '', PARAM_ALPHA);
@@ -55,8 +59,9 @@ $course = get_course($cm->course);
 
 require_login($course, false, $cm);
 $context = context_module::instance($cm->id);
+require_capability('mod/assign:submit', $context);
 
-$assign_record = $DB->get_record('assign', ['id' => $cm->instance], '*', MUST_EXIST);
+$assignrecord = $DB->get_record('assign', ['id' => $cm->instance], '*', MUST_EXIST);
 
 // Get plugin settings for this assignment.
 $settings = $DB->get_record('local_payunlock_settings', ['assignid' => $assignid]);
@@ -80,10 +85,15 @@ $access = local_paymentunlockassign_get_or_create_access($USER->id, $assignid);
 // assignment who lands on the payment page would be evaluated against the base dates
 // (zero on BSBLDR811-style assignments), derive 'locked', and be stuck in a payment
 // loop even though the hooks correctly saw them as 'available'.
-$dates    = local_paymentunlockassign_get_effective_dates($assign_record, $USER->id, $cm->course);
+$dates    = local_paymentunlockassign_get_effective_dates($assignrecord, $USER->id, $cm->course);
 $lockdate = local_paymentunlockassign_get_lockdate($dates, $settings);
 $now      = time();
 $status   = local_paymentunlockassign_derive_status($access, $lockdate, $now);
+// FIX-PUA-SUBMITTED (v1.2.7): a student whose latest attempt is submitted and awaiting
+// marking is not locked out and must not be able to pay.
+if ($status === 'locked' && local_paymentunlockassign_has_pending_submission($assignrecord->id, $USER->id)) {
+    $status = 'submitted';
+}
 
 // Handle checkout redirect action.
 if ($action === 'checkout' && confirm_sesskey()) {
@@ -98,10 +108,10 @@ if ($action === 'checkout' && confirm_sesskey()) {
         redirect(new moodle_url('/local/paymentunlockassign/student.php', ['assignid' => $assignid, 'courseid' => $courseid]));
     }
 
-    $next_attempt = $access->currentattempt + 1;
+    $nextattempt = $access->currentattempt + 1;
 
     // Check attempt 3 rules.
-    if ($next_attempt >= 3) {
+    if ($nextattempt >= 3) {
         if ($settings->attempt3mode === 'blocked') {
             redirect(
                 new moodle_url('/local/paymentunlockassign/student.php', ['assignid' => $assignid, 'courseid' => $courseid]),
@@ -121,58 +131,57 @@ if ($action === 'checkout' && confirm_sesskey()) {
     }
 
     // Determine fee.
-    if ($next_attempt === 1) {
+    if ($nextattempt === 1) {
         $fee = (float)$settings->attempt1fee;
     } else {
         $fee = (float)$settings->attempt2fee;
     }
     $currency = $settings->currency ?: 'AUD';
 
-    $success_url = (new moodle_url('/local/paymentunlockassign/student.php', [
+    $successurl = (new moodle_url('/local/paymentunlockassign/student.php', [
         'assignid' => $assignid,
         'courseid' => $courseid,
         'payment'  => 'success',
     ]))->out(false);
-    $cancel_url = (new moodle_url('/local/paymentunlockassign/student.php', [
+    $cancelurl = (new moodle_url('/local/paymentunlockassign/student.php', [
         'assignid' => $assignid,
         'courseid' => $courseid,
         'payment'  => 'cancelled',
     ]))->out(false);
 
     try {
-        $stripe_result = local_paymentunlockassign_create_stripe_session(
+        $striperesult = local_paymentunlockassign_create_stripe_session(
             $USER->id,
             $assignid,
             $courseid,
-            $next_attempt,
+            $nextattempt,
             $fee,
             $currency,
-            $assign_record->name,
-            $success_url,
-            $cancel_url
+            $assignrecord->name,
+            $successurl,
+            $cancelurl
         );
 
         // Record pending payment.
-        $payment_record = new stdClass();
-        $payment_record->studentid       = $USER->id;
-        $payment_record->assignid        = $assignid;
-        $payment_record->attemptnumber   = $next_attempt;
-        $payment_record->amount          = $fee;
-        $payment_record->currency        = $currency;
-        $payment_record->stripesessionid = $stripe_result['session_id'];
-        $payment_record->status          = 'pending';
-        $payment_record->timecreated     = time();
-        $DB->insert_record('local_payunlock_payments', $payment_record);
+        $paymentrecord = new stdClass();
+        $paymentrecord->studentid       = $USER->id;
+        $paymentrecord->assignid        = $assignid;
+        $paymentrecord->attemptnumber   = $nextattempt;
+        $paymentrecord->amount          = $fee;
+        $paymentrecord->currency        = $currency;
+        $paymentrecord->stripesessionid = $striperesult['session_id'];
+        $paymentrecord->status          = 'pending';
+        $paymentrecord->timecreated     = time();
+        $DB->insert_record('local_payunlock_payments', $paymentrecord);
 
         local_paymentunlockassign_log_event(
             'CHECKOUT_SESSION_CREATED',
-            ['attempt' => $next_attempt, 'fee' => $fee, 'session_id' => $stripe_result['session_id']],
+            ['attempt' => $nextattempt, 'fee' => $fee, 'session_id' => $striperesult['session_id']],
             $USER->id,
             $assignid
         );
 
-        redirect($stripe_result['url']);
-
+        redirect($striperesult['url']);
     } catch (Exception $e) {
         redirect(
             new moodle_url('/local/paymentunlockassign/student.php', ['assignid' => $assignid, 'courseid' => $courseid]),
@@ -193,18 +202,18 @@ $PAGE->set_heading($course->fullname);
 $PAGE->requires->css('/local/paymentunlockassign/styles.css');
 
 // Payment history for this student/assignment.
-$payment_records = $DB->get_records('local_payunlock_payments', [
+$paymentrecords = $DB->get_records('local_payunlock_payments', [
     'studentid' => $USER->id,
     'assignid'  => $assignid,
     'status'    => 'success',
 ], 'timepaid DESC');
 
 // Next attempt info.
-$next_attempt = $access->currentattempt + 1;
-if ($next_attempt === 1) {
-    $next_fee = (float)$settings->attempt1fee;
+$nextattempt = $access->currentattempt + 1;
+if ($nextattempt === 1) {
+    $nextfee = (float)$settings->attempt1fee;
 } else {
-    $next_fee = (float)$settings->attempt2fee;
+    $nextfee = (float)$settings->attempt2fee;
 }
 $currency = $settings->currency ?: 'AUD';
 
@@ -213,7 +222,7 @@ echo '<div class="payunlock-container">';
 
 // Assignment header.
 echo '<div class="payunlock-card payunlock-header-card">';
-echo '<h2>' . format_string($assign_record->name) . '</h2>';
+echo '<h2>' . format_string($assignrecord->name) . '</h2>';
 echo '<p class="payunlock-course">' . format_string($course->fullname) . '</p>';
 echo '</div>';
 
@@ -231,13 +240,13 @@ if ($payment === 'success') {
 echo '<div class="payunlock-card">';
 echo '<h3>' . get_string('assignment_status', 'local_paymentunlockassign') . '</h3>';
 
-$status_labels = [
+$statuslabels = [
     'available'  => ['class' => 'success', 'label' => get_string('status_available', 'local_paymentunlockassign')],
-    'reopened'   => ['class' => 'info',    'label' => get_string('status_reopened', 'local_paymentunlockassign')],
+    'reopened'   => ['class' => 'info', 'label' => get_string('status_reopened', 'local_paymentunlockassign')],
     'submitted'  => ['class' => 'success', 'label' => get_string('status_submitted', 'local_paymentunlockassign')],
-    'locked'     => ['class' => 'danger',  'label' => get_string('status_locked', 'local_paymentunlockassign')],
+    'locked'     => ['class' => 'danger', 'label' => get_string('status_locked', 'local_paymentunlockassign')],
 ];
-$sl = $status_labels[$status] ?? ['class' => 'secondary', 'label' => ucfirst($status)];
+$sl = $statuslabels[$status] ?? ['class' => 'secondary', 'label' => ucfirst($status)];
 echo '<p><strong>' . get_string('status', 'local_paymentunlockassign') . ':</strong> '
     . '<span class="badge badge-' . $sl['class'] . ' payunlock-status-badge">' . $sl['label'] . '</span></p>';
 
@@ -245,7 +254,8 @@ if ($status === 'reopened' && $access->unlockexpiry) {
     echo '<p>' . get_string('reopen_expires', 'local_paymentunlockassign', userdate($access->unlockexpiry)) . '</p>';
 }
 
-echo '<p><strong>' . get_string('current_attempt', 'local_paymentunlockassign') . ':</strong> ' . (int)$access->currentattempt . '</p>';
+echo '<p><strong>' . get_string('current_attempt', 'local_paymentunlockassign') . ':</strong> '
+    . (int)$access->currentattempt . '</p>';
 
 if ($lockdate) {
     echo '<p><strong>' . get_string('lock_date', 'local_paymentunlockassign') . ':</strong> ' . userdate($lockdate) . '</p>';
@@ -259,22 +269,23 @@ if ($status === 'locked') {
     echo '<h3>' . get_string('payment_required', 'local_paymentunlockassign') . '</h3>';
 
     // Check attempt 3 blocks.
-    if ($next_attempt >= 3 && $settings->attempt3mode === 'blocked') {
+    if ($nextattempt >= 3 && $settings->attempt3mode === 'blocked') {
         echo '<div class="alert alert-danger">' . get_string('attempt3_blocked_msg', 'local_paymentunlockassign') . '</div>';
-    } else if ($next_attempt >= 3 && $settings->attempt3mode === 'approval' && !$access->approvalgranted) {
+    } else if ($nextattempt >= 3 && $settings->attempt3mode === 'approval' && !$access->approvalgranted) {
         echo '<div class="alert alert-warning">' . get_string('attempt3_approval_msg', 'local_paymentunlockassign') . '</div>';
     } else {
-        echo '<p>' . get_string('attempt_label', 'local_paymentunlockassign', $next_attempt) . '</p>';
-        echo '<p class="payunlock-fee">' . get_string('fee_label', 'local_paymentunlockassign', $currency . ' $' . number_format($next_fee, 2)) . '</p>';
+        echo '<p>' . get_string('attempt_label', 'local_paymentunlockassign', $nextattempt) . '</p>';
+        $feetext = $currency . ' $' . number_format($nextfee, 2);
+        echo '<p class="payunlock-fee">' . get_string('fee_label', 'local_paymentunlockassign', $feetext) . '</p>';
         echo '<p class="payunlock-duration">Unlocked for ' . (int)$settings->reopendays . ' days after payment.</p>';
 
-        $checkout_url = new moodle_url('/local/paymentunlockassign/student.php', [
+        $checkouturl = new moodle_url('/local/paymentunlockassign/student.php', [
             'assignid'  => $assignid,
             'courseid'  => $courseid,
             'action'    => 'checkout',
             'sesskey'   => sesskey(),
         ]);
-        echo '<a href="' . $checkout_url->out(false) . '" class="btn btn-primary btn-lg payunlock-pay-btn">'
+        echo '<a href="' . $checkouturl->out(false) . '" class="btn btn-primary btn-lg payunlock-pay-btn">'
             . get_string('pay_now', 'local_paymentunlockassign') . '</a>';
     }
 
@@ -285,7 +296,8 @@ if ($status === 'locked') {
 echo '<div class="payunlock-card">';
 echo '<h3>' . get_string('fee_rules_heading', 'local_paymentunlockassign') . '</h3>';
 echo '<table class="table">';
-echo '<thead><tr><th>' . get_string('attempt_number', 'local_paymentunlockassign') . '</th><th>' . get_string('fee_amount', 'local_paymentunlockassign') . '</th></tr></thead>';
+echo '<thead><tr><th>' . get_string('attempt_number', 'local_paymentunlockassign') . '</th><th>'
+    . get_string('fee_amount', 'local_paymentunlockassign') . '</th></tr></thead>';
 echo '<tbody>';
 echo '<tr><td>1</td><td>' . $currency . ' $' . number_format((float)$settings->attempt1fee, 2) . '</td></tr>';
 echo '<tr><td>2</td><td>' . $currency . ' $' . number_format((float)$settings->attempt2fee, 2) . '</td></tr>';
@@ -300,13 +312,15 @@ echo '</div>';
 // Payment history.
 echo '<div class="payunlock-card">';
 echo '<h3>' . get_string('payment_history', 'local_paymentunlockassign') . '</h3>';
-if (empty($payment_records)) {
+if (empty($paymentrecords)) {
     echo '<p>' . get_string('no_payment_history', 'local_paymentunlockassign') . '</p>';
 } else {
     echo '<table class="table">';
-    echo '<thead><tr><th>' . get_string('attempt_number', 'local_paymentunlockassign') . '</th><th>' . get_string('amount', 'local_paymentunlockassign') . '</th><th>' . get_string('paid_at', 'local_paymentunlockassign') . '</th></tr></thead>';
+    echo '<thead><tr><th>' . get_string('attempt_number', 'local_paymentunlockassign') . '</th><th>'
+        . get_string('amount', 'local_paymentunlockassign') . '</th><th>'
+        . get_string('paid_at', 'local_paymentunlockassign') . '</th></tr></thead>';
     echo '<tbody>';
-    foreach ($payment_records as $pr) {
+    foreach ($paymentrecords as $pr) {
         echo '<tr>';
         echo '<td>' . (int)$pr->attemptnumber . '</td>';
         echo '<td>' . $pr->currency . ' $' . number_format((float)$pr->amount, 2) . '</td>';
@@ -318,11 +332,12 @@ if (empty($payment_records)) {
 echo '</div>';
 
 // Return to assignment link.
-$assign_url = new moodle_url('/mod/assign/view.php', ['id' => $assignid]);
+$assignurl = new moodle_url('/mod/assign/view.php', ['id' => $assignid]);
 echo '<div class="payunlock-actions">';
-echo '<a href="' . $assign_url->out(false) . '" class="btn btn-secondary">' . get_string('return_to_assignment', 'local_paymentunlockassign') . '</a>';
+echo '<a href="' . $assignurl->out(false) . '" class="btn btn-secondary">'
+    . get_string('return_to_assignment', 'local_paymentunlockassign') . '</a>';
 echo '</div>';
 
-echo '</div>'; // .payunlock-container
+echo '</div>'; // End of .payunlock-container.
 
 echo $OUTPUT->footer();

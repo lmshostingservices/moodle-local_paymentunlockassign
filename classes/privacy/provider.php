@@ -1,18 +1,26 @@
 <?php
-/**
- * local_paymentunlockassign file.
- *
- * @package    local_paymentunlockassign
- * @copyright  2026 LMS-Labs
- * @license    http://www.gnu.org/licenses/gpl-3.0.html GNU GPL v3 or later
- */
-
 // This file is part of Moodle - http://moodle.org/
 //
 // Moodle is free software: you can redistribute it and/or modify
 // it under the terms of the GNU General Public License as published by
 // the Free Software Foundation, either version 3 of the License, or
 // (at your option) any later version.
+//
+// Moodle is distributed in the hope that it will be useful,
+// but WITHOUT ANY WARRANTY; without even the implied warranty of
+// MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+// GNU General Public License for more details.
+//
+// You should have received a copy of the GNU General Public License
+// along with Moodle.  If not, see <https://www.gnu.org/licenses/>.
+
+/**
+ * Privacy provider for local_paymentunlockassign.
+ *
+ * @package    local_paymentunlockassign
+ * @copyright  2026 LMS Labs
+ * @license    https://www.gnu.org/copyleft/gpl.html GNU GPL v3 or later
+ */
 
 namespace local_paymentunlockassign\privacy;
 
@@ -22,12 +30,19 @@ use core_privacy\local\request\contextlist;
 use core_privacy\local\request\userlist;
 use core_privacy\local\request\approved_userlist;
 
-defined('MOODLE_INTERNAL') || die();
-
+/**
+ * Privacy provider: describes, exports and deletes the payment, access and audit data this plugin stores.
+ */
 class provider implements
     \core_privacy\local\metadata\provider,
-    \core_privacy\local\request\plugin\provider,
-    \core_privacy\local\request\core_userlist_provider {
+    \core_privacy\local\request\core_userlist_provider,
+    \core_privacy\local\request\plugin\provider {
+    /**
+     * Describe the personal data stored by this plugin.
+     *
+     * @param collection $collection The collection to add metadata to.
+     * @return collection
+     */
     public static function get_metadata(collection $collection): collection {
         $collection->add_database_table(
             'local_payunlock_access',
@@ -69,12 +84,23 @@ class provider implements
         return $collection;
     }
 
+    /**
+     * Get the contexts that hold data for a user.
+     *
+     * @param int $userid The user ID.
+     * @return contextlist
+     */
     public static function get_contexts_for_userid(int $userid): contextlist {
         $contextlist = new contextlist();
         $contextlist->add_system_context();
         return $contextlist;
     }
 
+    /**
+     * Get the users who have data in a context.
+     *
+     * @param userlist $userlist The userlist to fill.
+     */
     public static function get_users_in_context(userlist $userlist): void {
         $context = $userlist->get_context();
         if (!$context instanceof \context_system) {
@@ -83,6 +109,11 @@ class provider implements
         $userlist->add_from_sql('studentid', 'SELECT DISTINCT studentid FROM {local_payunlock_access}', []);
     }
 
+    /**
+     * Export a user's data for the approved contexts.
+     *
+     * @param approved_contextlist $contextlist The approved contexts.
+     */
     public static function export_user_data(approved_contextlist $contextlist): void {
         global $DB;
         $userid = $contextlist->get_user()->id;
@@ -106,6 +137,11 @@ class provider implements
         }
     }
 
+    /**
+     * Delete all users' data in a context.
+     *
+     * @param \context $context The context.
+     */
     public static function delete_data_for_all_users_in_context(\context $context): void {
         global $DB;
         if (!$context instanceof \context_system) {
@@ -116,23 +152,33 @@ class provider implements
         $DB->delete_records('local_payunlock_audit');
     }
 
+    /**
+     * Delete a user's data in the approved contexts.
+     *
+     * @param approved_contextlist $contextlist The approved contexts.
+     */
     public static function delete_data_for_user(approved_contextlist $contextlist): void {
         global $DB;
         $userid = $contextlist->get_user()->id;
-        $DB->delete_records('local_payunlock_access',   ['studentid' => $userid]);
+        $DB->delete_records('local_payunlock_access', ['studentid' => $userid]);
         $DB->delete_records('local_payunlock_payments', ['studentid' => $userid]);
-        $DB->delete_records('local_payunlock_audit',    ['studentid' => $userid]);
+        $DB->delete_records('local_payunlock_audit', ['studentid' => $userid]);
     }
 
+    /**
+     * Delete the data of several users in a context.
+     *
+     * @param approved_userlist $userlist The approved users.
+     */
     public static function delete_data_for_users(approved_userlist $userlist): void {
         global $DB;
         $userids = $userlist->get_userids();
         if (empty($userids)) {
             return;
         }
-        list($insql, $inparams) = $DB->get_in_or_equal($userids, SQL_PARAMS_NAMED);
-        $DB->delete_records_select('local_payunlock_access',   "studentid $insql", $inparams);
+        [$insql, $inparams] = $DB->get_in_or_equal($userids, SQL_PARAMS_NAMED);
+        $DB->delete_records_select('local_payunlock_access', "studentid $insql", $inparams);
         $DB->delete_records_select('local_payunlock_payments', "studentid $insql", $inparams);
-        $DB->delete_records_select('local_payunlock_audit',    "studentid $insql", $inparams);
+        $DB->delete_records_select('local_payunlock_audit', "studentid $insql", $inparams);
     }
 }

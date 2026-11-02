@@ -1,64 +1,104 @@
-# Changelog - Payment Unlock Assignment
+# Changelog
 
-All notable changes to this plugin will be documented in this file.
+All notable changes to Payment Unlock Assignment (`local_paymentunlockassign`) are documented in this file.
+The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
-## [1.0.17] - 2026-03-20
+## [v1.2.8] - 2026-11-02
+
+### Fixed
+- **Custom lock date now saves.** On Moodle 4.4 and later, the date picker on the assignment settings form was attached to Moodle's Edit mode switch instead of the settings form, so the date was always saved as empty.
+- **Add submission is now hidden for locked students.** Moodle renders this button as a form that carries the action in a hidden field, and the old selectors never matched it. A locked student who clicked it was already redirected to the payment page, but the button stayed visible.
+
+### Security
+- The student payment page checks the `mod/assign:submit` capability as well as requiring login.
 
 ### Changed
-- **VERSION BUMP**: No functional changes. Increments the version number so sites already on v1.0.16 can confirm they have the latest release.
+- Includes the full GPL v3 licence text, a complete README and a complete changelog.
+- New version number: a v1.2.7 package with different contents had already been submitted for release.
 
-## [1.0.16] - 2026-03-20
+## [v1.2.7] - 2026-10-15
 
-### Fixed
-- **BUG-LOCK-INSTANT (Layer 1 — derive_status)**: `derive_status()` previously returned `'available'` if the assignment's own lockdate was still in the future, even when a teacher had explicitly set `status='locked'` via "Lock Immediately". Added check `if ($access->status === 'locked') return 'locked';` before the lockdate comparison so teacher-forced locks always take priority.
-- **BUG-LOCK-INSTANT (Layer 2 — Moodle override)**: `manage.php` `lock` case now calls `local_paymentunlockassign_remove_moodle_override()` which deletes the student's `assign_overrides` record. When a student paid to reopen, this override kept a future `duedate` in the Moodle table, causing Moodle's core UI to continue rendering the "Add Submission" button regardless of the plugin's locked status.
-- **BUG-LOCK-INSTANT (Layer 3 — JS button hide)**: The `before_footer` JS injection now also calls `hideAddSubmissionButtons()` which sets `display:none` on all known "Add submission" / "Edit submission" button selectors across Moodle 4.0–4.5 theme variants (Boost, Classic, child themes), ensuring the button is hidden even if Moodle's markup is loaded before our notice is inserted.
-
-## [1.0.14] - 2026-03-18
+Go-live safety release. No database schema changes.
 
 ### Fixed
-- **HOOK-MIGRATION**: Removed deprecated `local_paymentunlockassign_before_http_headers()` from lib.php (triggered Moodle 4.4+ debugging warning via `get_plugins_with_function()`). Migrated to `core\hook\output\before_http_headers` hook registered in `db/hooks.php` and implemented in `classes/hook/listener.php::before_http_headers()`. Behaviour is identical — locked students navigating to `action=editsubmission` are redirected to the payment page.
+- **Free-window overrides removed.** The plugin no longer writes a personal Moodle override for every student who opens an enabled assignment between the due date and the cut-off date. Moodle already allows submission in that window. The overrides removed the late flag, stayed in place after the plugin was disabled, and locked students out if a teacher later extended the cut-off.
+- **Moodle extensions honoured.** Students with a teacher-granted extension (Grant extension) are no longer redirected to the payment page or have Add submission hidden.
+- **Submitted students not charged.** Students whose latest attempt is submitted and awaiting marking no longer see the "Locked – pay" banner and cannot start a checkout.
+- **Licence check no longer slows pages.** Cached site-wide for 12 hours (7-day grace if lms-labs.com is unreachable), 5-second timeout, only checked when a paywall is about to be shown, and no longer closes the user's session.
+- **Admin Lock preserves teacher overrides.** Only the override the plugin wrote for a paid or admin reopen is removed.
+- **Webhook** only unlocks when Stripe reports `payment_status = paid`. The checkout URL is no longer stored as a receipt URL.
 
-## [1.0.13] - 2026-03-18
+### Changed
+- Minimum Moodle version is now 4.4, which the output hooks in `db/hooks.php` require.
 
-### Fixed
-- **BUG-LOCK-INSTANT**: Added  Moodle hook. When a locked student navigates to  they are immediately redirected to the payment page (student.php). Teachers and graders (mod/assign:grade capability) are exempt. Lock status is derived using the same  logic as the existing UI.
+## [v1.2.6] - 2026-07-23
 
-
-## [1.0.11] - 2026-03-17
+Includes all changes since v1.0.17. Interim builds v1.0.20 to v1.2.2 were not dated separately; their notes are in `version.php`.
 
 ### Added
-- **Reopen Assignment button on the assignment submission page.** When a student's assignment is locked, a prominent banner now appears on the Moodle™ assignment view page (`/mod/assign/view.php`) above the submission status table. The banner includes:
-  - A lock icon and a descriptive notice explaining the assignment is locked.
-  - A **"Reopen Assignment — [Currency] $[Fee]"** button linking directly to the payment page.
-  - For third-attempt blocked/approval cases: an info notice is shown instead of the payment button.
-- Uses the Moodle™ 4.3+ hook system (`core\hook\output\before_footer_html_generation`) via `db/hooks.php` and `classes/hook/listener.php`.
-- Button is shown to students only (teachers/graders with `mod/assign:grade` are excluded).
-
-## [1.0.3] - 2026-03-12
-
-### Fixed / Improved
-- manage.php "not active" error is now an actionable help panel instead of a dead-end message. The panel:
-  - Detects whether credentials (Site ID / API Key) are missing and links directly to plugin settings if so.
-  - Explains that the plugin requires a one-time 1,000 AI Credits unlock.
-  - Links to lms-labs.com/docs/payment-unlock-assignment where the Unlock Plugin button is found.
-  - Shows a note if the activation server may be temporarily unreachable.
-
-## [1.0.2] - 2026-03-06
+- A global Enabled setting to pause the plugin site-wide (v1.0.20).
+- Lock date source setting: the cut-off date (default) or the due date (v1.1.0).
+- The Reopen button is hidden for students who already have a passing grade (v1.1.0).
+- Personal override in the window between due date and cut-off (v1.1.1; removed again in v1.2.7).
 
 ### Fixed
-- SECURITY: Fixed PHP parse error (double backslash in privacy provider) that caused a fatal error on all Moodle™ 4.x pages
-- Stripe webhook no longer calls the AI Grader API during payment processing
-- Added 5-minute Stripe timestamp replay-attack window to signature verification
-- GDPR: export_user_data, delete_data_for_user, and delete_data_for_users now correctly export and purge records
-- Invoice references now use INV-YYYYMMDD-000XXX format
+- `filelib.php` is loaded only when needed, not on every page request (v1.0.21).
+- `lib.php` is loaded before the HTTP-headers hook runs (v1.0.22).
+- Saving settings no longer stores the assignment's own date as a custom lock date (v1.1.2).
+- Assignments with no due date or cut-off date no longer lock every student (v1.1.3).
+- Lock decisions use each student's effective dates, honouring user and group overrides (v1.2.0, v1.2.1).
+- The editsubmission redirect checks the site licence first (v1.2.0).
+- No user override is created on assignments that use group overrides (v1.2.1, v1.2.2).
+- A paid reopen never shortens a student's existing deadline (v1.2.2).
 
-## [1.0.1] - 2026-03-01
+## [v1.0.17] - 2026-03-20
+
+### Changed
+- Version bump. No functional changes.
+
+## [v1.0.16] - 2026-03-20
 
 ### Fixed
-- Removed invalid DEFAULT="null" from XMLDB install.xml that prevented DB tables from being created
+- **Lock immediately.**
+  - A teacher-set lock now takes priority over the assignment's lock date.
+  - Locking removes the student's paid-reopen override.
+  - The Add submission buttons are hidden for locked students.
 
-## [1.0.0] - 2026-02-25
+## [v1.0.14] - 2026-03-18
+
+### Fixed
+- Moved to the Moodle 4.4+ `before_http_headers` hook. This removed a debugging warning.
+
+## [v1.0.13] - 2026-03-18
+
+### Fixed
+- Locked students who open the submission form are redirected to the payment page. Teachers and graders are exempt.
+
+## [v1.0.11] - 2026-03-17
 
 ### Added
-- Initial release
+- A Reopen Assignment banner and button on the assignment page for locked students. Students on a blocked or approval-only third attempt see an information notice instead.
+
+## [v1.0.3] - 2026-03-12
+
+### Fixed
+- When the plugin is not active, the Manage page shows setup help instead of a dead-end error.
+
+## [v1.0.2] - 2026-03-06
+
+### Fixed
+- Parse error in the privacy provider.
+- The Stripe webhook no longer calls the AI Grader API.
+- A 5-minute replay window on webhook signatures.
+- GDPR export and delete.
+- Invoice reference format.
+
+## [v1.0.1] - 2026-03-01
+
+### Fixed
+- `install.xml` default value that stopped the tables from being created.
+
+## [v1.0.0] - 2026-02-25
+
+### Added
+- Initial release.

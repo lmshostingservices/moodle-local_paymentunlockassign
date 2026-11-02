@@ -5,15 +5,29 @@
 // it under the terms of the GNU General Public License as published by
 // the Free Software Foundation, either version 3 of the License, or
 // (at your option) any later version.
+//
+// Moodle is distributed in the hope that it will be useful,
+// but WITHOUT ANY WARRANTY; without even the implied warranty of
+// MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+// GNU General Public License for more details.
+//
+// You should have received a copy of the GNU General Public License
+// along with Moodle.  If not, see <https://www.gnu.org/licenses/>.
 
-defined('MOODLE_INTERNAL') || die();
+/**
+ * Library functions for local_paymentunlockassign.
+ *
+ * @package    local_paymentunlockassign
+ * @copyright  2026 LMS Labs
+ * @license    https://www.gnu.org/copyleft/gpl.html GNU GPL v3 or later
+ */
 
 /**
  * Returns true if the plugin is globally enabled via site settings.
  * Defaults to enabled (returns true) if the config key has not been saved yet.
  * @package    local_paymentunlockassign
  * @copyright  2026 LMS-Labs
- * @license    http://www.gnu.org/licenses/gpl-3.0.html GNU GPL v3 or later
+ * @license    https://www.gnu.org/copyleft/gpl.html GNU GPL v3 or later
  */
 function local_paymentunlockassign_is_enabled() {
     $val = get_config('local_paymentunlockassign', 'enabled');
@@ -22,6 +36,7 @@ function local_paymentunlockassign_is_enabled() {
 
 /**
  * Get Site ID: Central Config takes priority over local setting.
+ * @package local_paymentunlockassign
  */
 function local_paymentunlockassign_get_siteid() {
     $aiconfig = get_config('local_aiconfig', 'siteid');
@@ -33,6 +48,7 @@ function local_paymentunlockassign_get_siteid() {
 
 /**
  * Get API Key: Central Config takes priority over local setting.
+ * @package local_paymentunlockassign
  */
 function local_paymentunlockassign_get_apikey() {
     $aiconfig = get_config('local_aiconfig', 'apikey');
@@ -43,14 +59,18 @@ function local_paymentunlockassign_get_apikey() {
 }
 
 /**
- * Verify credit unlock with AI Grader server. Fail-closed: deny if unreachable.
+ * Verify credit unlock with the LMS Labs server. Cached site-wide (12h); keeps a
+ * positive result for up to 7 days if the server is unreachable. $force bypasses the cache.
+ *
+ * @param bool $force
+ * @return bool
+ * @package local_paymentunlockassign
  */
-function local_paymentunlockassign_check_unlock() {
+function local_paymentunlockassign_check_unlock($force = false) {
     global $CFG;
-    require_once($CFG->libdir . '/filelib.php');
 
     static $cache = null;
-    if ($cache !== null) {
+    if (!$force && $cache !== null) {
         return $cache;
     }
 
@@ -62,23 +82,53 @@ function local_paymentunlockassign_check_unlock() {
         return false;
     }
 
+    // FIX-PUA-LICENCECACHE (v1.2.7): The licence result is cached site-wide for
+    // 12 hours. Previously every student view of an enabled assignment made a
+    // blocking call to lms-labs.com with a 10s timeout, so a slow licence server
+    // added 10s to every one of those page loads and could exhaust PHP workers.
+    // A positive result survives a licence-server outage for up to 7 days.
+    $credhash   = sha1($siteid . '|' . $apikey);
+    $lastok     = (int)get_config('local_paymentunlockassign', 'licence_lastok');
+    $lastcheck  = (int)get_config('local_paymentunlockassign', 'licence_lastcheck');
+    $cachedhash = (string)get_config('local_paymentunlockassign', 'licence_hash');
+    $now        = time();
+    if (!$force && $cachedhash === $credhash && $lastcheck > $now - 12 * HOURSECS) {
+        $cache = ($lastok > $now - 7 * DAYSECS);
+        return $cache;
+    }
+
+    require_once($CFG->libdir . '/filelib.php');
     $url = 'https://lms-labs.com/api/plugin-unlock/verify?pluginId=paymentunlockassign'
         . '&siteId=' . rawurlencode($siteid)
         . '&apiKey=' . rawurlencode($apikey);
 
-    \core\session\manager::write_close();
+    // NOTE: session is deliberately NOT closed here (v1.2.7). Closing it caused
+    // later session writes on the same request (e.g. redirect notifications on
+    // student.php) to be silently discarded.
     $curl = new \curl();
-    $curl->setopt(['CURLOPT_TIMEOUT' => 10, 'CURLOPT_SSL_VERIFYPEER' => true]);
-    $response = $curl->get($url);
-    $http_code = $curl->info['http_code'];
+    $curl->setopt(['CURLOPT_TIMEOUT' => 5, 'CURLOPT_CONNECTTIMEOUT' => 3, 'CURLOPT_SSL_VERIFYPEER' => true]);
+    $response  = $curl->get($url);
+    $httpcode = $curl->info['http_code'] ?? 0;
+    $data      = ($httpcode === 200 && $response) ? json_decode($response, true) : null;
 
-    if ($http_code !== 200 || !$response) {
-        $cache = false;
-        return false;
+    // Retry after 15 minutes if the server could not be reached, otherwise after 12 hours.
+    $nextcheckbase = is_array($data) ? $now : $now - 12 * HOURSECS + 15 * MINSECS;
+    set_config('licence_lastcheck', $nextcheckbase, 'local_paymentunlockassign');
+    set_config('licence_hash', $credhash, 'local_paymentunlockassign');
+    if (is_array($data)) {
+        if (!empty($data['unlocked'])) {
+            set_config('licence_lastok', $now, 'local_paymentunlockassign');
+            $cache = true;
+        } else {
+            // Definitive "not unlocked" answer from the server.
+            set_config('licence_lastok', 0, 'local_paymentunlockassign');
+            $cache = false;
+        }
+        return $cache;
     }
 
-    $data = json_decode($response, true);
-    $cache = !empty($data['unlocked']);
+    // Server unreachable / error: keep a recent positive result (grace period).
+    $cache = ($cachedhash === $credhash && $lastok > $now - 7 * DAYSECS);
     return $cache;
 }
 
@@ -96,30 +146,35 @@ function local_paymentunlockassign_check_unlock() {
  * NOTE: an override row may have duedate/cutoffdate as NULL, meaning "inherit
  * from base". Only treat a value as authoritative when it is non-null.
  *
- * @param stdClass $assign_record  Base {assign} record (must include id, duedate, cutoffdate).
+ * @param stdClass $assignrecord  Base {assign} record (must include id, duedate, cutoffdate).
  * @param int      $studentid      Moodle user id.
  * @param int      $courseid       Course id (used to resolve student group memberships).
  * @return object  {duedate:int, cutoffdate:int}
+ * @package local_paymentunlockassign
  */
-function local_paymentunlockassign_get_effective_dates($assign_record, $studentid, $courseid) {
+function local_paymentunlockassign_get_effective_dates($assignrecord, $studentid, $courseid) {
     global $DB;
 
-    $duedate    = (int)$assign_record->duedate;
-    $cutoffdate = (int)$assign_record->cutoffdate;
+    $duedate    = (int)$assignrecord->duedate;
+    $cutoffdate = (int)$assignrecord->cutoffdate;
 
     // 1. User override wins outright.
-    $user_override = $DB->get_record('assign_overrides', [
-        'assignid' => $assign_record->id,
+    $useroverride = $DB->get_record('assign_overrides', [
+        'assignid' => $assignrecord->id,
         'userid'   => $studentid,
     ]);
-    if ($user_override) {
-        if ($user_override->duedate !== null) {
-            $duedate = (int)$user_override->duedate;
+    if ($useroverride) {
+        if ($useroverride->duedate !== null) {
+            $duedate = (int)$useroverride->duedate;
         }
-        if ($user_override->cutoffdate !== null) {
-            $cutoffdate = (int)$user_override->cutoffdate;
+        if ($useroverride->cutoffdate !== null) {
+            $cutoffdate = (int)$useroverride->cutoffdate;
         }
-        return (object)['duedate' => $duedate, 'cutoffdate' => $cutoffdate];
+        return local_paymentunlockassign_apply_extension(
+            (object)['duedate' => $duedate, 'cutoffdate' => $cutoffdate],
+            $assignrecord->id,
+            $studentid
+        );
     }
 
     // 2. Group overrides — lowest sortorder wins (Moodle's own rule).
@@ -130,12 +185,12 @@ function local_paymentunlockassign_get_effective_dates($assign_record, $studenti
                AND o.userid IS NULL
                AND gm.userid = :userid
           ORDER BY o.sortorder ASC";
-    $group_overrides = $DB->get_records_sql($sql, [
-        'assignid' => $assign_record->id,
+    $groupoverrides = $DB->get_records_sql($sql, [
+        'assignid' => $assignrecord->id,
         'userid'   => $studentid,
     ]);
-    if ($group_overrides) {
-        $winner = reset($group_overrides);
+    if ($groupoverrides) {
+        $winner = reset($groupoverrides);
         if ($winner->duedate !== null) {
             $duedate = (int)$winner->duedate;
         }
@@ -145,7 +200,71 @@ function local_paymentunlockassign_get_effective_dates($assign_record, $studenti
     }
 
     // 3. Base assignment values (already loaded above).
-    return (object)['duedate' => $duedate, 'cutoffdate' => $cutoffdate];
+    return local_paymentunlockassign_apply_extension(
+        (object)['duedate' => $duedate, 'cutoffdate' => $cutoffdate],
+        $assignrecord->id,
+        $studentid
+    );
+}
+
+/**
+ * FIX-PUA-EXTENSION (v1.2.7): Honour Moodle's own "Grant extension" feature
+ * ({assign_user_flags}.extensionduedate). Moodle lets a student with an extension
+ * submit until the extension date even after the cut-off; the plugin previously
+ * ignored extensions and redirected these students to the payment page.
+ *
+ * @param object $dates          {duedate, cutoffdate}
+ * @param int    $assigninstance {assign}.id
+ * @param int    $studentid
+ * @return object
+ * @package local_paymentunlockassign
+ */
+function local_paymentunlockassign_apply_extension($dates, $assigninstance, $studentid) {
+    global $DB;
+    $ext = (int)$DB->get_field(
+        'assign_user_flags',
+        'extensionduedate',
+        ['assignment' => $assigninstance, 'userid' => $studentid]
+    );
+    if ($ext > 0) {
+        $dates->duedate = max((int)$dates->duedate, $ext);
+        if (!empty($dates->cutoffdate)) {
+            $dates->cutoffdate = max((int)$dates->cutoffdate, $ext);
+        }
+    }
+    return $dates;
+}
+
+/**
+ * FIX-PUA-SUBMITTED (v1.2.7): True when the student's latest attempt is
+ * submitted and awaiting marking. Such students must never see the paywall —
+ * they met the deadline. Once a marker reopens the attempt (status 'reopened')
+ * or the student never submitted, this returns false and normal rules apply.
+ *
+ * @param int $assigninstance {assign}.id
+ * @param int $studentid
+ * @return bool
+ * @package local_paymentunlockassign
+ */
+function local_paymentunlockassign_has_pending_submission($assigninstance, $studentid) {
+    global $DB;
+    if (
+        $DB->record_exists_select(
+            'assign_submission',
+            'assignment = :a AND userid = :u AND latest = 1 AND status = :s',
+            ['a' => $assigninstance, 'u' => $studentid, 's' => 'submitted']
+        )
+    ) {
+        return true;
+    }
+    // Group (team) submissions are stored with userid = 0 against the group.
+    return $DB->record_exists_sql(
+        "SELECT 1
+           FROM {assign_submission} s
+           JOIN {groups_members} gm ON gm.groupid = s.groupid AND gm.userid = :u
+          WHERE s.assignment = :a AND s.userid = 0 AND s.latest = 1 AND s.status = :s",
+        ['a' => $assigninstance, 'u' => $studentid, 's' => 'submitted']
+    );
 }
 
 /**
@@ -164,13 +283,14 @@ function local_paymentunlockassign_get_effective_dates($assign_record, $studenti
  *   3. If source is 'cutoffdate' but assignment has no cutoffdate set,
  *      fall back to duedate.
  *
- * FIX-PUA-OVERRIDES (v1.2.0): Parameter changed from $assign_record (base row)
+ * FIX-PUA-OVERRIDES (v1.2.0): Parameter changed from $assignrecord (base row)
  * to $dates (resolved effective dates object). Call
  * local_paymentunlockassign_get_effective_dates() first and pass its result here.
  *
  * @param object        $dates     Effective dates object with duedate and cutoffdate fields.
  * @param stdClass|null $settings  The local_payunlock_settings record.
  * @return int  Unix timestamp of the effective lock date (0 if no date set).
+ * @package local_paymentunlockassign
  */
 function local_paymentunlockassign_get_lockdate($dates, $settings) {
     // Priority 1: explicit custom date set by admin in plugin settings.
@@ -187,7 +307,7 @@ function local_paymentunlockassign_get_lockdate($dates, $settings) {
         return (int)$dates->duedate;
     }
 
-    // 'cutoffdate' — fall back to duedate if assignment has no cutoff configured.
+    // Source 'cutoffdate': fall back to duedate if the assignment has no cut-off configured.
     if (!empty($dates->cutoffdate)) {
         return (int)$dates->cutoffdate;
     }
@@ -196,6 +316,7 @@ function local_paymentunlockassign_get_lockdate($dates, $settings) {
 
 /**
  * Derive the display status of a student access record.
+ * @package local_paymentunlockassign
  */
 function local_paymentunlockassign_derive_status($access, $lockdate, $now = null) {
     if ($now === null) {
@@ -243,6 +364,7 @@ function local_paymentunlockassign_derive_status($access, $lockdate, $now = null
  * @param int $studentid   Moodle user id of the student.
  * @param int $assignid    Course module id (cmid) of the assignment.
  * @return bool  True if the student has a final grade >= the grade item's gradepass.
+ * @package local_paymentunlockassign
  */
 function local_paymentunlockassign_student_has_passed($studentid, $assignid) {
     global $DB;
@@ -295,6 +417,7 @@ function local_paymentunlockassign_student_has_passed($studentid, $assignid) {
  * @param int           $assignid  Course module id.
  * @param int|null      $now       Current timestamp (defaults to time()).
  * @return bool  True = show paywall. False = suppress it.
+ * @package local_paymentunlockassign
  */
 function local_paymentunlockassign_should_show_paywall($access, $settings, $lockdate, $studentid, $assignid, $now = null) {
     if ($now === null) {
@@ -303,6 +426,13 @@ function local_paymentunlockassign_should_show_paywall($access, $settings, $lock
 
     $status = local_paymentunlockassign_derive_status($access, $lockdate, $now);
     if ($status !== 'locked') {
+        return false;
+    }
+
+    // FIX-PUA-SUBMITTED (v1.2.7): never show the paywall to a student whose latest
+    // attempt is submitted and awaiting marking.
+    $cm = get_coursemodule_from_id('assign', $assignid);
+    if ($cm && local_paymentunlockassign_has_pending_submission($cm->instance, $studentid)) {
         return false;
     }
 
@@ -326,21 +456,43 @@ function local_paymentunlockassign_should_show_paywall($access, $settings, $lock
  *
  * @param int $assignid  local_payunlock_access.assignid (= course-module id).
  * @param int $studentid User ID of the student.
+ * @package local_paymentunlockassign
  */
-function local_paymentunlockassign_remove_moodle_override($assignid, $studentid) {
+function local_paymentunlockassign_remove_moodle_override($assignid, $studentid, $access = null) {
     global $DB;
     $cm = get_coursemodule_from_id('assign', $assignid);
     if (!$cm) {
-        return;
+        return false;
     }
-    $DB->delete_records('assign_overrides', [
-        'assignid' => $cm->instance,
-        'userid'   => $studentid,
-    ]);
+    $override = $DB->get_record('assign_overrides', ['assignid' => $cm->instance, 'userid' => $studentid]);
+    if (!$override) {
+        return false;
+    }
+    // FIX-PUA-LOCKSAFE (v1.2.7): only delete an override that this plugin wrote for a
+    // paid/admin reopen (duedate = unlockexpiry, cutoffdate = unlockexpiry + 1 day).
+    // Teacher-created overrides (special consideration, reasonable adjustment) are
+    // never deleted; the plugin's own lock still applies on top of them.
+    $expiry = $access ? (int)$access->unlockexpiry : 0;
+    $pluginmade = $expiry > 0
+        && (int)$override->duedate === $expiry
+        && (int)$override->cutoffdate === $expiry + DAYSECS;
+    if (!$pluginmade) {
+        local_paymentunlockassign_log_event(
+            'lock_teacher_override_preserved',
+            ['overrideid' => $override->id],
+            $studentid,
+            $assignid
+        );
+        return false;
+    }
+    $DB->delete_records('assign_overrides', ['id' => $override->id]);
+    \cache::make('mod_assign', 'overrides')->delete("{$cm->instance}_u_{$studentid}");
+    return true;
 }
 
 /**
  * Get or create a student access record.
+ * @package local_paymentunlockassign
  */
 function local_paymentunlockassign_get_or_create_access($studentid, $assignid) {
     global $DB;
@@ -364,6 +516,7 @@ function local_paymentunlockassign_get_or_create_access($studentid, $assignid) {
 
 /**
  * Log an audit event.
+ * @package local_paymentunlockassign
  */
 function local_paymentunlockassign_log_event($eventtype, $data = [], $studentid = null, $assignid = null, $userid = null) {
     global $DB, $USER;
@@ -392,6 +545,7 @@ function local_paymentunlockassign_log_event($eventtype, $data = [], $studentid 
  *
  * @param int $assigninstance The {assign}.id (NOT the cmid).
  * @return bool
+ * @package local_paymentunlockassign
  */
 function local_paymentunlockassign_has_group_overrides($assigninstance) {
     global $DB;
@@ -402,83 +556,19 @@ function local_paymentunlockassign_has_group_overrides($assigninstance) {
     );
 }
 
-/**
- * Ensure a student has a Moodle assignment override covering the "free window"
- * between the assignment's due date and cut-off date.
- *
- * FIX-PUA-FREEWINDOW (v1.1.1): Moodle's "Prevent late submissions" setting hides
- * the "Add submission" button after the due date — even when a cut-off date is set
- * and the plugin hasn't locked the student yet. This function creates (or updates)
- * an assign_overrides row that extends the student's personal due date to the
- * cut-off date, so Moodle shows the button during the free window.
- *
- * Only called when: status='available' AND now > duedate AND now < cutoffdate.
- * The override is idempotent — if one already exists that covers until cut-off,
- * it is left unchanged.
- *
- * @param int $assignid   Course module id of the assignment.
- * @param int $studentid  Moodle user id of the student.
- * @param int $cutoffdate Unix timestamp of the assignment's cut-off date.
- * @return bool
- */
-function local_paymentunlockassign_ensure_free_window_override($assignid, $studentid, $cutoffdate) {
-    global $DB;
-    $cm = get_coursemodule_from_id('assign', $assignid);
-    if (!$cm) {
-        return false;
-    }
-
-    // FIX-PUA-GROUPCLOBBER (v1.2.1) / FIX-PUA-GROUPGUARD (v1.2.2):
-    // A user override permanently outranks all group overrides in Moodle. On
-    // assignments managed via group overrides, skip user-override creation
-    // entirely. The free-window button will not auto-appear on such assignments
-    // until a non-invasive approach is implemented (v1.3.x).
-    if (local_paymentunlockassign_has_group_overrides($cm->instance)) {
-        local_paymentunlockassign_log_event(
-            'freewindow_override_skipped_group_managed',
-            ['assignid' => $assignid, 'assigninstance' => $cm->instance],
-            $studentid, $assignid
-        );
-        return 'skipped';
-    }
-
-    $existing = $DB->get_record('assign_overrides', [
-        'assignid' => $cm->instance,
-        'userid'   => $studentid,
-    ]);
-    if ($existing) {
-        // Only update if the current override doesn't already cover until cut-off.
-        if ((int)$existing->duedate >= (int)$cutoffdate) {
-            return 'ok'; // Already covers until cut-off — nothing to do.
-        }
-        $override              = clone $existing;
-        $override->duedate    = (int)$cutoffdate;
-        $override->cutoffdate = (int)$cutoffdate;
-        $DB->update_record('assign_overrides', $override);
-        return 'ok'; // Updated existing override.
-    } else {
-        $override                           = new stdClass();
-        $override->assignid                 = $cm->instance;
-        $override->userid                   = $studentid;
-        $override->duedate                  = (int)$cutoffdate;
-        $override->cutoffdate               = (int)$cutoffdate;
-        $override->allowsubmissionsfromdate = null;
-        $override->timelimit                = null;
-        $DB->insert_record('assign_overrides', $override);
-        // FIX-PUA-OVERRIDE-TIMING (v1.1.3): Return 'new' so the caller knows a fresh
-        // override was just inserted. The before_http_headers hook uses this to redirect
-        // the student to the same page, ensuring Moodle's assign module reads the
-        // freshly-written override from the DB at the start of the next request rather
-        // than potentially serving a state that was computed before the override existed.
-        return 'new';
-    }
-}
+// FIX-PUA-NOFREEWINDOW (v1.2.7): local_paymentunlockassign_ensure_free_window_override()
+// removed. Moodle core already allows submission between the due date and the cut-off
+// date (marked late). The function silently wrote a user override for every student who
+// opened the page in that window, which (a) removed the late flag, (b) persisted after the
+// plugin was disabled and (c) pinned students to the old cut-off if a teacher later
+// extended it, locking them out while classmates could still submit.
 
 /**
  * Extend Moodle assignment due date for a specific student via assign_overrides.
  * @param int $assignid   Assignment cmid (course module id)
  * @param int $studentid  Moodle user id
  * @param int $newduedate Unix timestamp for new due date
+ * @package local_paymentunlockassign
  */
 function local_paymentunlockassign_extend_moodle_assignment($assignid, $studentid, $newduedate) {
     global $DB;
@@ -487,7 +577,7 @@ function local_paymentunlockassign_extend_moodle_assignment($assignid, $studenti
         return false;
     }
 
-    $assign_record = $DB->get_record('assign', ['id' => $cm->instance]);
+    $assignrecord = $DB->get_record('assign', ['id' => $cm->instance]);
 
     // FIX-PUA-NOSHORTEN (v1.2.2): Never write an override that gives the student
     // less time than they currently have from their group or base dates. Resolve the
@@ -495,7 +585,7 @@ function local_paymentunlockassign_extend_moodle_assignment($assignid, $studenti
     // the scenario where a student pays $250 to reopen and ends up with a shorter
     // deadline than classmates who paid nothing — which happens when
     // $newduedate + DAYSECS is earlier than the student's existing group cut-off.
-    $effective  = local_paymentunlockassign_get_effective_dates($assign_record, $studentid, $cm->course);
+    $effective  = local_paymentunlockassign_get_effective_dates($assignrecord, $studentid, $cm->course);
     $newcutoff  = (int)$newduedate + DAYSECS;
     $newduedate = max((int)$newduedate, (int)$effective->duedate);
     $newcutoff  = max($newcutoff, (int)$effective->cutoffdate);
@@ -516,50 +606,66 @@ function local_paymentunlockassign_extend_moodle_assignment($assignid, $studenti
         $override->timelimit              = null;
         $DB->insert_record('assign_overrides', $override);
     }
+    \cache::make('mod_assign', 'overrides')->delete("{$cm->instance}_u_{$studentid}");
     return true;
 }
 
 /**
  * Create a Stripe checkout session via HTTP.
  * Returns ['url' => '...', 'session_id' => '...'] or throws on error.
+ * @package local_paymentunlockassign
  */
-function local_paymentunlockassign_create_stripe_session($studentid, $assignid, $courseid, $attempt_number, $amount, $currency, $assign_name, $success_url, $cancel_url) {
+function local_paymentunlockassign_create_stripe_session(
+    $studentid,
+    $assignid,
+    $courseid,
+    $attemptnumber,
+    $amount,
+    $currency,
+    $assignname,
+    $successurl,
+    $cancelurl
+) {
     global $CFG;
     require_once($CFG->libdir . '/filelib.php');
 
-    $stripe_secret = get_config('local_paymentunlockassign', 'stripe_secret_key');
-    if (empty($stripe_secret)) {
+    $stripesecret = get_config('local_paymentunlockassign', 'stripe_secret_key');
+    if (empty($stripesecret)) {
         throw new moodle_exception('Stripe is not configured. Contact your administrator.');
     }
 
     $postdata = http_build_query([
         'mode'                                            => 'payment',
-        'success_url'                                     => $success_url,
-        'cancel_url'                                      => $cancel_url,
+        'success_url'                                     => $successurl,
+        'cancel_url'                                      => $cancelurl,
         'payment_method_types[]'                          => 'card',
         'line_items[0][price_data][currency]'             => strtolower($currency),
         'line_items[0][price_data][unit_amount]'          => (int)round($amount * 100),
-        'line_items[0][price_data][product_data][name]'   => 'Late Submission Unlock - Attempt ' . $attempt_number,
-        'line_items[0][price_data][product_data][description]' => $assign_name,
+        'line_items[0][price_data][product_data][name]'   => 'Late Submission Unlock - Attempt ' . $attemptnumber,
+        'line_items[0][price_data][product_data][description]' => $assignname,
         'line_items[0][quantity]'                         => '1',
         'metadata[studentid]'                             => $studentid,
         'metadata[assignid]'                              => $assignid,
         'metadata[courseid]'                              => $courseid,
-        'metadata[attempt_number]'                        => $attempt_number,
+        'metadata[attempt_number]'                        => $attemptnumber,
     ]);
 
-    \core\session\manager::write_close();
     $curl2 = new \curl();
-    $curl2->setopt(['CURLOPT_TIMEOUT' => 20, 'CURLOPT_SSL_VERIFYPEER' => true, 'CURLOPT_USERPWD' => $stripe_secret . ':', 'CURLOPT_HTTPAUTH' => CURLAUTH_BASIC]);
+    $curl2->setopt([
+        'CURLOPT_TIMEOUT' => 20,
+        'CURLOPT_SSL_VERIFYPEER' => true,
+        'CURLOPT_USERPWD' => $stripesecret . ':',
+        'CURLOPT_HTTPAUTH' => CURLAUTH_BASIC,
+    ]);
     $response = $curl2->post('https://api.stripe.com/v1/checkout/sessions', $postdata);
-    $http_code = $curl2->info['http_code'];
+    $httpcode = $curl2->info['http_code'];
 
     if (!$response) {
         throw new moodle_exception('Failed to connect to Stripe. Please try again later.');
     }
 
     $data = json_decode($response, true);
-    if ($http_code !== 200 || empty($data['url'])) {
+    if ($httpcode !== 200 || empty($data['url'])) {
         $msg = isset($data['error']['message']) ? $data['error']['message'] : 'Unknown Stripe error';
         throw new moodle_exception('Stripe error: ' . $msg);
     }
@@ -570,14 +676,15 @@ function local_paymentunlockassign_create_stripe_session($studentid, $assignid, 
 /**
  * Verify Stripe webhook signature.
  * @param string $payload    Raw POST body
- * @param string $sig_header HTTP_STRIPE_SIGNATURE header value
+ * @param string $sigheader HTTP_STRIPE_SIGNATURE header value
  * @param string $secret     Webhook signing secret
  * @return bool
+ * @package local_paymentunlockassign
  */
-function local_paymentunlockassign_verify_stripe_signature($payload, $sig_header, $secret) {
+function local_paymentunlockassign_verify_stripe_signature($payload, $sigheader, $secret) {
     $timestamp   = null;
     $signatures  = [];
-    foreach (explode(',', $sig_header) as $part) {
+    foreach (explode(',', $sigheader) as $part) {
         $kv = explode('=', trim($part), 2);
         if (count($kv) !== 2) {
             continue;
@@ -597,7 +704,7 @@ function local_paymentunlockassign_verify_stripe_signature($payload, $sig_header
     if (abs(time() - (int)$timestamp) > 300) {
         return false;
     }
-    $signed_payload  = $timestamp . '.' . $payload;
-    $expected        = hash_hmac('sha256', $signed_payload, $secret);
+    $signedpayload  = $timestamp . '.' . $payload;
+    $expected        = hash_hmac('sha256', $signedpayload, $secret);
     return in_array($expected, $signatures, true);
 }

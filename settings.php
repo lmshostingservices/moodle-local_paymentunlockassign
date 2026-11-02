@@ -1,18 +1,26 @@
 <?php
-/**
- * local_paymentunlockassign file.
- *
- * @package    local_paymentunlockassign
- * @copyright  2026 LMS-Labs
- * @license    http://www.gnu.org/licenses/gpl-3.0.html GNU GPL v3 or later
- */
-
 // This file is part of Moodle - http://moodle.org/
 //
 // Moodle is free software: you can redistribute it and/or modify
 // it under the terms of the GNU General Public License as published by
 // the Free Software Foundation, either version 3 of the License, or
 // (at your option) any later version.
+//
+// Moodle is distributed in the hope that it will be useful,
+// but WITHOUT ANY WARRANTY; without even the implied warranty of
+// MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+// GNU General Public License for more details.
+//
+// You should have received a copy of the GNU General Public License
+// along with Moodle.  If not, see <https://www.gnu.org/licenses/>.
+
+/**
+ * local_paymentunlockassign file.
+ *
+ * @package    local_paymentunlockassign
+ * @copyright  2026 LMS-Labs
+ * @license    https://www.gnu.org/copyleft/gpl.html GNU GPL v3 or later
+ */
 
 defined('MOODLE_INTERNAL') || die();
 
@@ -74,11 +82,12 @@ if ($hassiteconfig) {
     ));
 
     // Stripe Webhook Secret.
-    $webhook_url = (isset($CFG) && isset($CFG->wwwroot)) ? $CFG->wwwroot . '/local/paymentunlockassign/webhook.php' : '[your_moodle_url]/local/paymentunlockassign/webhook.php';
+    $webhookbase = (isset($CFG) && isset($CFG->wwwroot)) ? $CFG->wwwroot : '[your_moodle_url]';
+    $webhookurl = $webhookbase . '/local/paymentunlockassign/webhook.php';
     $settings->add(new admin_setting_configpasswordunmask(
         'local_paymentunlockassign/stripe_webhook_secret',
         get_string('settings_stripe_webhook_secret', 'local_paymentunlockassign'),
-        get_string('settings_stripe_webhook_secret_desc', 'local_paymentunlockassign', $webhook_url),
+        get_string('settings_stripe_webhook_secret_desc', 'local_paymentunlockassign', $webhookurl),
         ''
     ));
 

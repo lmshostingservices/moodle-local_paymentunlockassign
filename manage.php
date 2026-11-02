@@ -1,12 +1,4 @@
 <?php
-/**
- * local_paymentunlockassign file.
- *
- * @package    local_paymentunlockassign
- * @copyright  2026 LMS-Labs
- * @license    http://www.gnu.org/licenses/gpl-3.0.html GNU GPL v3 or later
- */
-
 // This file is part of Moodle - http://moodle.org/
 //
 // Moodle is free software: you can redistribute it and/or modify
@@ -14,8 +6,21 @@
 // the Free Software Foundation, either version 3 of the License, or
 // (at your option) any later version.
 //
-// Admin management page for Payment Unlock Assignment.
-// URL: /local/paymentunlockassign/manage.php
+// Moodle is distributed in the hope that it will be useful,
+// but WITHOUT ANY WARRANTY; without even the implied warranty of
+// MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+// GNU General Public License for more details.
+//
+// You should have received a copy of the GNU General Public License
+// along with Moodle.  If not, see <https://www.gnu.org/licenses/>.
+
+/**
+ * local_paymentunlockassign file.
+ *
+ * @package    local_paymentunlockassign
+ * @copyright  2026 LMS-Labs
+ * @license    https://www.gnu.org/copyleft/gpl.html GNU GPL v3 or later
+ */
 
 require_once(__DIR__ . '/../../config.php');
 require_once(__DIR__ . '/lib.php');
@@ -24,7 +29,7 @@ require_login();
 require_capability('moodle/site:config', context_system::instance());
 
 $tab        = optional_param('tab', 'assignments', PARAM_ALPHA);
-$edit_assign = optional_param('assignid', 0, PARAM_INT);
+$editassign = optional_param('assignid', 0, PARAM_INT);
 $action     = optional_param('action', '', PARAM_ALPHA);
 
 $PAGE->set_context(context_system::instance());
@@ -34,13 +39,14 @@ $PAGE->set_heading(get_string('manage', 'local_paymentunlockassign'));
 $PAGE->set_pagelayout('admin');
 $PAGE->requires->css('/local/paymentunlockassign/styles.css');
 
-// Check plugin is unlocked.
-if (!local_paymentunlockassign_check_unlock()) {
-    $settings_url  = new moodle_url('/admin/settings.php', ['section' => 'local_paymentunlockassign']);
-    $docs_url      = 'https://lms-labs.com/docs/payment-unlock-assignment';
+// Check plugin is unlocked. If the cached result says "not active", re-check live so an
+// admin who has just unlocked the plugin is not kept waiting for the 12-hour cache.
+if (!local_paymentunlockassign_check_unlock() && !local_paymentunlockassign_check_unlock(true)) {
+    $settingsurl  = new moodle_url('/admin/settings.php', ['section' => 'local_paymentunlockassign']);
+    $docsurl      = 'https://lms-labs.com/docs/payment-unlock-assignment';
     $siteid        = local_paymentunlockassign_get_siteid();
     $apikey        = local_paymentunlockassign_get_apikey();
-    $missing_creds = empty($siteid) || empty($apikey);
+    $missingcreds = empty($siteid) || empty($apikey);
 
     echo $OUTPUT->header();
     echo '<div class="alert alert-danger" role="alert" style="max-width:680px;margin:2rem auto;">';
@@ -50,19 +56,19 @@ if (!local_paymentunlockassign_check_unlock()) {
        . 'Complete the two steps below to activate it.</p>';
     echo '<ol style="margin-bottom:1rem;">';
 
-    if ($missing_creds) {
+    if ($missingcreds) {
         echo '<li><strong>Configure credentials first.</strong> '
            . 'Your Site ID and/or API Key are not yet saved for this plugin. '
-           . '<a href="' . $settings_url->out() . '">Go to plugin settings</a> and enter your Site ID and API Key '
+           . '<a href="' . $settingsurl->out() . '">Go to plugin settings</a> and enter your Site ID and API Key '
            . '(found on your lms-labs.com dashboard).</li>';
     } else {
         echo '<li><strong>Credentials are configured.</strong> '
            . 'Site ID and API Key are set. '
-           . '<a href="' . $settings_url->out() . '">Review settings</a> if the error persists.</li>';
+           . '<a href="' . $settingsurl->out() . '">Review settings</a> if the error persists.</li>';
     }
 
     echo '<li><strong>Unlock the plugin with 1,000 AI Credits.</strong> '
-       . 'Go to <a href="' . $docs_url . '" target="_blank">lms-labs.com &rarr; Payment Unlock Assignment</a>, '
+       . 'Go to <a href="' . $docsurl . '" target="_blank">lms-labs.com &rarr; Payment Unlock Assignment</a>, '
        . 'click the <strong>Unlock Plugin</strong> button, enter your Site ID and API Key, and confirm the unlock. '
        . 'The Manage page will become available immediately after the unlock is processed.</li>';
     echo '</ol>';
@@ -113,37 +119,43 @@ if ($action === 'save' && confirm_sesskey()) {
 
 // Handle admin overrides.
 if ($action === 'override' && confirm_sesskey()) {
-    $override_type = required_param('override_type', PARAM_ALPHA);
+    $overridetype = required_param('override_type', PARAM_ALPHA);
     $studentid     = required_param('studentid', PARAM_INT);
-    $assignid_ov   = required_param('assignid_ov', PARAM_INT);
+    $assignidov   = required_param('assignid_ov', PARAM_INT);
     $reason        = optional_param('reason', '', PARAM_TEXT);
-    $extra_days    = optional_param('extra_days', 7, PARAM_INT);
+    $extradays    = optional_param('extra_days', 7, PARAM_INT);
 
-    $access = local_paymentunlockassign_get_or_create_access($studentid, $assignid_ov);
-    $settings_ov = $DB->get_record('local_payunlock_settings', ['assignid' => $assignid_ov]);
-    $reopen_days = $settings_ov ? (int)$settings_ov->reopendays : 7;
+    $access = local_paymentunlockassign_get_or_create_access($studentid, $assignidov);
+    $settingsov = $DB->get_record('local_payunlock_settings', ['assignid' => $assignidov]);
+    $reopendays = $settingsov ? (int)$settingsov->reopendays : 7;
 
-    switch ($override_type) {
+    switch ($overridetype) {
         case 'reopen':
-            $expiry = time() + ($reopen_days * DAYSECS);
+            $expiry = time() + ($reopendays * DAYSECS);
             $access->status        = 'reopened';
             $access->unlockexpiry  = $expiry;
             $access->timemodified  = time();
             $DB->update_record('local_payunlock_access', $access);
-            local_paymentunlockassign_extend_moodle_assignment($assignid_ov, $studentid, $expiry);
-            local_paymentunlockassign_log_event('ADMIN_REOPEN_OVERRIDE', ['reason' => $reason], $studentid, $assignid_ov);
+            local_paymentunlockassign_extend_moodle_assignment($assignidov, $studentid, $expiry);
+            local_paymentunlockassign_log_event('ADMIN_REOPEN_OVERRIDE', ['reason' => $reason], $studentid, $assignidov);
             break;
 
         case 'extend':
-            $new_expiry = ($access->unlockexpiry ?: time()) + ($extra_days * DAYSECS);
-            $access->unlockexpiry  = $new_expiry;
+            $newexpiry = ($access->unlockexpiry ?: time()) + ($extradays * DAYSECS);
+            $access->unlockexpiry  = $newexpiry;
             $access->timemodified  = time();
             $DB->update_record('local_payunlock_access', $access);
-            local_paymentunlockassign_extend_moodle_assignment($assignid_ov, $studentid, $new_expiry);
-            local_paymentunlockassign_log_event('ADMIN_EXTEND_OVERRIDE', ['reason' => $reason, 'extra_days' => $extra_days], $studentid, $assignid_ov);
+            local_paymentunlockassign_extend_moodle_assignment($assignidov, $studentid, $newexpiry);
+            local_paymentunlockassign_log_event(
+                'ADMIN_EXTEND_OVERRIDE',
+                ['reason' => $reason, 'extra_days' => $extradays],
+                $studentid,
+                $assignidov
+            );
             break;
 
         case 'lock':
+            $prevaccess           = clone $access;
             $access->status       = 'locked';
             $access->lastlockedat = time();
             $access->timemodified = time();
@@ -152,8 +164,8 @@ if ($action === 'override' && confirm_sesskey()) {
             // Moodle's own UI immediately stops showing "Add Submission". Without this,
             // the override created when the student paid keeps a future duedate active
             // and Moodle renders the button regardless of our plugin's locked status.
-            local_paymentunlockassign_remove_moodle_override($assignid_ov, $studentid);
-            local_paymentunlockassign_log_event('ADMIN_LOCK_OVERRIDE', ['reason' => $reason], $studentid, $assignid_ov);
+            local_paymentunlockassign_remove_moodle_override($assignidov, $studentid, $prevaccess);
+            local_paymentunlockassign_log_event('ADMIN_LOCK_OVERRIDE', ['reason' => $reason], $studentid, $assignidov);
             break;
 
         case 'approve':
@@ -165,27 +177,27 @@ if ($action === 'override' && confirm_sesskey()) {
             // stayed permanently blocked. Mirror the 'reopen' case: set status,
             // set expiry, and extend the Moodle assignment due date so the student
             // can actually submit once they land on the assignment page.
-            $expiry = time() + ($reopen_days * DAYSECS);
+            $expiry = time() + ($reopendays * DAYSECS);
             $access->approvalgranted = 1;
             $access->status          = 'reopened';
             $access->unlockexpiry    = $expiry;
             $access->timemodified    = time();
             $DB->update_record('local_payunlock_access', $access);
-            local_paymentunlockassign_extend_moodle_assignment($assignid_ov, $studentid, $expiry);
-            local_paymentunlockassign_log_event('ADMIN_APPROVE_OVERRIDE', ['reason' => $reason], $studentid, $assignid_ov);
+            local_paymentunlockassign_extend_moodle_assignment($assignidov, $studentid, $expiry);
+            local_paymentunlockassign_log_event('ADMIN_APPROVE_OVERRIDE', ['reason' => $reason], $studentid, $assignidov);
             break;
     }
 
     // Log override record.
-    $ov_record = new stdClass();
-    $ov_record->studentid    = $studentid;
-    $ov_record->assignid     = $assignid_ov;
-    $ov_record->adminid      = $USER->id;
-    $ov_record->overridetype = $override_type;
-    $ov_record->reason       = $reason;
-    $ov_record->newexpiry    = $access->unlockexpiry ?? null;
-    $ov_record->timecreated  = time();
-    $DB->insert_record('local_payunlock_overrides', $ov_record);
+    $ovrecord = new stdClass();
+    $ovrecord->studentid    = $studentid;
+    $ovrecord->assignid     = $assignidov;
+    $ovrecord->adminid      = $USER->id;
+    $ovrecord->overridetype = $overridetype;
+    $ovrecord->reason       = $reason;
+    $ovrecord->newexpiry    = $access->unlockexpiry ?? null;
+    $ovrecord->timecreated  = time();
+    $DB->insert_record('local_payunlock_overrides', $ovrecord);
 
     redirect(
         new moodle_url('/local/paymentunlockassign/manage.php', ['tab' => 'access']),
@@ -199,33 +211,52 @@ echo $OUTPUT->header();
 
 // Tabs.
 $tabs = [
-    new tabobject('assignments', new moodle_url('/local/paymentunlockassign/manage.php', ['tab' => 'assignments']), get_string('tab_assignments', 'local_paymentunlockassign')),
-    new tabobject('access',      new moodle_url('/local/paymentunlockassign/manage.php', ['tab' => 'access']),      get_string('tab_access', 'local_paymentunlockassign')),
-    new tabobject('payments',    new moodle_url('/local/paymentunlockassign/manage.php', ['tab' => 'payments']),    get_string('tab_payments', 'local_paymentunlockassign')),
-    new tabobject('audit',       new moodle_url('/local/paymentunlockassign/manage.php', ['tab' => 'audit']),       get_string('tab_audit', 'local_paymentunlockassign')),
+    new tabobject(
+        'assignments',
+        new moodle_url('/local/paymentunlockassign/manage.php', ['tab' => 'assignments']),
+        get_string('tab_assignments', 'local_paymentunlockassign')
+    ),
+    new tabobject(
+        'access',
+        new moodle_url('/local/paymentunlockassign/manage.php', ['tab' => 'access']),
+        get_string('tab_access', 'local_paymentunlockassign')
+    ),
+    new tabobject(
+        'payments',
+        new moodle_url('/local/paymentunlockassign/manage.php', ['tab' => 'payments']),
+        get_string('tab_payments', 'local_paymentunlockassign')
+    ),
+    new tabobject(
+        'audit',
+        new moodle_url('/local/paymentunlockassign/manage.php', ['tab' => 'audit']),
+        get_string('tab_audit', 'local_paymentunlockassign')
+    ),
 ];
 echo $OUTPUT->tabtree($tabs, $tab);
 
-// ---- ASSIGNMENTS TAB ----
-if ($tab === 'assignments') {
+$yesbadge = '<span class="badge badge-success">Yes</span>';
+$nobadge = '<span class="badge badge-secondary">No</span>';
 
+// Assignments tab.
+if ($tab === 'assignments') {
     // If editing a specific assignment.
-    if ($edit_assign) {
-        $cm = get_coursemodule_from_id('assign', $edit_assign, 0, false, MUST_EXIST);
-        $assign_rec = $DB->get_record('assign', ['id' => $cm->instance], '*', MUST_EXIST);
-        $settings = $DB->get_record('local_payunlock_settings', ['assignid' => $edit_assign]);
-        $def_curr = get_config('local_paymentunlockassign', 'currency') ?: 'AUD';
-        $def_days = get_config('local_paymentunlockassign', 'reopen_days') ?: 7;
-        $def_fee1 = get_config('local_paymentunlockassign', 'attempt1_fee') ?: 75;
-        $def_fee2 = get_config('local_paymentunlockassign', 'attempt2_fee') ?: 125;
-        $def_mode = get_config('local_paymentunlockassign', 'attempt3_mode') ?: 'blocked';
+    if ($editassign) {
+        $cm = get_coursemodule_from_id('assign', $editassign, 0, false, MUST_EXIST);
+        $assignrec = $DB->get_record('assign', ['id' => $cm->instance], '*', MUST_EXIST);
+        $settings = $DB->get_record('local_payunlock_settings', ['assignid' => $editassign]);
+        $defcurr = get_config('local_paymentunlockassign', 'currency') ?: 'AUD';
+        $defdays = get_config('local_paymentunlockassign', 'reopen_days') ?: 7;
+        $deffee1 = get_config('local_paymentunlockassign', 'attempt1_fee') ?: 75;
+        $deffee2 = get_config('local_paymentunlockassign', 'attempt2_fee') ?: 125;
+        $defmode = get_config('local_paymentunlockassign', 'attempt3_mode') ?: 'blocked';
 
         echo '<div class="payunlock-card">';
-        echo '<h3>' . get_string('configure_assignment', 'local_paymentunlockassign') . ': ' . format_string($assign_rec->name) . '</h3>';
+        echo '<h3>' . get_string('configure_assignment', 'local_paymentunlockassign') . ': '
+            . format_string($assignrec->name) . '</h3>';
         echo '<form method="post" action="' . (new moodle_url('/local/paymentunlockassign/manage.php'))->out(false) . '">';
         echo '<input type="hidden" name="action" value="save">';
         echo '<input type="hidden" name="sesskey" value="' . sesskey() . '">';
-        echo '<input type="hidden" name="assignid" value="' . $edit_assign . '">';
+        echo '<input type="hidden" name="assignid" value="' . $editassign . '">';
         echo '<input type="hidden" name="courseid" value="' . $cm->course . '">';
 
         $enabled         = $settings ? (int)$settings->enabled : 0;
@@ -236,17 +267,18 @@ if ($tab === 'assignments') {
         // the custom date to be silently saved on every form submit, overriding the
         // lockdatesource dropdown (Priority 1 in get_lockdate() fires on any non-zero value).
         // Leave blank when no custom date is set so get_lockdate() uses lockdatesource.
-        $lockdate_display = ($settings && !empty($settings->lockdate))
+        $lockdatedisplay = ($settings && !empty($settings->lockdate))
             ? date('Y-m-d', (int)$settings->lockdate)
             : '';
-        $fee1      = $settings ? (float)$settings->attempt1fee : $def_fee1;
-        $fee2      = $settings ? (float)$settings->attempt2fee : $def_fee2;
-        $mode      = $settings ? $settings->attempt3mode : $def_mode;
-        $days      = $settings ? (int)$settings->reopendays : $def_days;
-        $curr      = $settings ? $settings->currency : $def_curr;
+        $fee1      = $settings ? (float)$settings->attempt1fee : $deffee1;
+        $fee2      = $settings ? (float)$settings->attempt2fee : $deffee2;
+        $mode      = $settings ? $settings->attempt3mode : $defmode;
+        $days      = $settings ? (int)$settings->reopendays : $defdays;
+        $curr      = $settings ? $settings->currency : $defcurr;
 
         echo '<table class="table payunlock-form-table"><tbody>';
-        echo '<tr><td><label>Enabled</label></td><td><input type="checkbox" name="enabled" value="1" ' . ($enabled ? 'checked' : '') . '></td></tr>';
+        echo '<tr><td><label>Enabled</label></td><td><input type="checkbox" name="enabled" value="1" '
+            . ($enabled ? 'checked' : '') . '></td></tr>';
 
         // Lock date source (new in v1.1.0).
         echo '<tr><td><label>' . get_string('lock_date_source', 'local_paymentunlockassign') . '</label></td><td>';
@@ -263,7 +295,7 @@ if ($tab === 'assignments') {
         // The hidden field carries the Unix timestamp on submit (JS converts date → timestamp).
         // Leave the date input empty when no custom date is stored — empty means "use lockdatesource".
         echo '<tr><td><label>' . get_string('lock_date_custom', 'local_paymentunlockassign') . '</label></td><td>';
-        echo '<input type="date" id="lockdate_picker" value="' . htmlspecialchars($lockdate_display) . '" class="form-control">';
+        echo '<input type="date" id="lockdate_picker" value="' . htmlspecialchars($lockdatedisplay) . '" class="form-control">';
         echo '<input type="hidden" name="lockdate_raw" id="lockdate_unix" value="0">';
         echo '<br><small>' . get_string('lock_date_custom_desc', 'local_paymentunlockassign') . '</small>';
         echo '</td></tr>';
@@ -273,28 +305,38 @@ if ($tab === 'assignments') {
         echo '<input type="checkbox" name="hidepassing" value="1" ' . ($hidepassing ? 'checked' : '') . '>';
         echo '<br><small>' . get_string('hide_passing_desc', 'local_paymentunlockassign') . '</small>';
         echo '</td></tr>';
-        echo '<tr><td><label>Attempt 1 Fee (' . htmlspecialchars($curr) . ')</label></td><td><input type="number" step="0.01" name="attempt1fee" value="' . $fee1 . '" class="form-control" style="width:120px"></td></tr>';
-        echo '<tr><td><label>Attempt 2 Fee (' . htmlspecialchars($curr) . ')</label></td><td><input type="number" step="0.01" name="attempt2fee" value="' . $fee2 . '" class="form-control" style="width:120px"></td></tr>';
+        foreach (['attempt1fee' => ['Attempt 1 Fee', $fee1], 'attempt2fee' => ['Attempt 2 Fee', $fee2]] as $feename => $feeinfo) {
+            echo '<tr><td><label>' . $feeinfo[0] . ' (' . htmlspecialchars($curr) . ')</label></td><td>'
+                . '<input type="number" step="0.01" name="' . $feename . '" value="' . $feeinfo[1] . '"'
+                . ' class="form-control" style="width:120px"></td></tr>';
+        }
         echo '<tr><td><label>Attempt 3+ Policy</label></td><td>';
         echo '<select name="attempt3mode" class="form-control" style="width:auto">';
         echo '<option value="blocked" ' . ($mode === 'blocked' ? 'selected' : '') . '>Blocked</option>';
         echo '<option value="approval" ' . ($mode === 'approval' ? 'selected' : '') . '>Requires admin approval</option>';
         echo '</select></td></tr>';
-        echo '<tr><td><label>Reopen Duration (days)</label></td><td><input type="number" name="reopendays" value="' . $days . '" class="form-control" style="width:100px"></td></tr>';
-        echo '<tr><td><label>Currency</label></td><td><input type="text" name="currency" value="' . htmlspecialchars($curr) . '" class="form-control" style="width:100px"></td></tr>';
+        echo '<tr><td><label>Reopen Duration (days)</label></td><td>'
+            . '<input type="number" name="reopendays" value="' . $days . '" class="form-control" style="width:100px"></td></tr>';
+        echo '<tr><td><label>Currency</label></td><td>'
+            . '<input type="text" name="currency" value="' . htmlspecialchars($curr) . '" class="form-control" style="width:100px">'
+            . '</td></tr>';
         echo '</tbody></table>';
 
         echo '<button type="submit" class="btn btn-primary">' . get_string('save', 'local_paymentunlockassign') . '</button> ';
-        echo '<a href="' . (new moodle_url('/local/paymentunlockassign/manage.php', ['tab' => 'assignments']))->out(false) . '" class="btn btn-secondary">Cancel</a>';
+        $cancelurl = new moodle_url('/local/paymentunlockassign/manage.php', ['tab' => 'assignments']);
+        echo '<a href="' . $cancelurl->out(false) . '" class="btn btn-secondary">Cancel</a>';
         echo '</form>';
         echo '</div>';
 
         // BUG-PAY-WARN fix: inline <script> tags echoed directly from PHP trigger
         // a Moodle debug warning ("Scripts must use $PAGE->requires->js_init_code").
         // Replace with the correct Moodle API so the page passes strict mode checks.
-        $js_lockdate = <<<'JSCODE'
+        $jslockdate = <<<'JSCODE'
 require([], function () {
-    var f = document.querySelector("form");
+    // Attach to the settings form itself: the first form on the page is Moodle's
+    // "Edit mode" switch in the navbar (Moodle 4.4+), so the lock date was never saved.
+    var picker0 = document.getElementById("lockdate_picker");
+    var f = picker0 ? picker0.closest("form") : null;
     if (!f) { return; }
     f.addEventListener("submit", function () {
         var picker = document.getElementById("lockdate_picker");
@@ -311,8 +353,7 @@ require([], function () {
     });
 });
 JSCODE;
-        $PAGE->requires->js_init_code($js_lockdate, false);
-
+        $PAGE->requires->js_init_code($jslockdate, false);
     } else {
         // List all assignments across all courses.
         $sql = 'SELECT cm.id AS cmid, a.name, c.fullname AS coursename, c.id AS courseid
@@ -331,7 +372,8 @@ JSCODE;
             echo '<p>' . get_string('noassignments', 'local_paymentunlockassign') . '</p>';
         } else {
             echo '<table class="table">';
-            echo '<thead><tr><th>' . get_string('course') . '</th><th>' . get_string('assignment', 'local_paymentunlockassign') . '</th>'
+            echo '<thead><tr><th>' . get_string('course') . '</th>'
+                . '<th>' . get_string('assignment', 'local_paymentunlockassign') . '</th>'
                 . '<th>' . get_string('enabled', 'local_paymentunlockassign') . '</th>'
                 . '<th>' . get_string('attempt1_fee', 'local_paymentunlockassign') . '</th>'
                 . '<th>' . get_string('attempt2_fee', 'local_paymentunlockassign') . '</th>'
@@ -340,15 +382,19 @@ JSCODE;
             echo '<tbody>';
             foreach ($assignments as $a) {
                 $s = $DB->get_record('local_payunlock_settings', ['assignid' => $a->cmid]);
-                $edit_url = new moodle_url('/local/paymentunlockassign/manage.php', ['tab' => 'assignments', 'assignid' => $a->cmid]);
+                $editurl = new moodle_url(
+                    '/local/paymentunlockassign/manage.php',
+                    ['tab' => 'assignments', 'assignid' => $a->cmid]
+                );
                 echo '<tr>';
                 echo '<td>' . format_string($a->coursename) . '</td>';
                 echo '<td>' . format_string($a->name) . '</td>';
-                echo '<td>' . ($s && $s->enabled ? '<span class="badge badge-success">Yes</span>' : '<span class="badge badge-secondary">No</span>') . '</td>';
+                echo '<td>' . ($s && $s->enabled ? $yesbadge : $nobadge) . '</td>';
                 echo '<td>' . ($s ? $s->currency . ' $' . number_format((float)$s->attempt1fee, 2) : '-') . '</td>';
                 echo '<td>' . ($s ? $s->currency . ' $' . number_format((float)$s->attempt2fee, 2) : '-') . '</td>';
                 echo '<td>' . ($s ? (int)$s->reopendays : '-') . '</td>';
-                echo '<td><a href="' . $edit_url->out(false) . '" class="btn btn-sm btn-primary">' . get_string('edit', 'local_paymentunlockassign') . '</a></td>';
+                echo '<td><a href="' . $editurl->out(false) . '" class="btn btn-sm btn-primary">'
+                    . get_string('edit', 'local_paymentunlockassign') . '</a></td>';
                 echo '</tr>';
             }
             echo '</tbody></table>';
@@ -357,7 +403,7 @@ JSCODE;
     }
 }
 
-// ---- ACCESS TAB ----
+// Student access tab.
 if ($tab === 'access') {
     $sql = 'SELECT pua.*, u.firstname, u.lastname, u.email, a.name AS assignname, c.fullname AS coursename, cm.id AS cmid
             FROM {local_payunlock_access} pua
@@ -389,28 +435,39 @@ if ($tab === 'access') {
             echo '<td>' . fullname($acc) . '<br><small>' . htmlspecialchars($acc->email) . '</small></td>';
             echo '<td>' . format_string($acc->assignname) . '</td>';
             echo '<td>' . format_string($acc->coursename) . '</td>';
-            echo '<td><span class="badge badge-' . ($acc->status === 'reopened' ? 'info' : ($acc->status === 'locked' ? 'danger' : ($acc->status === 'submitted' ? 'success' : 'secondary'))) . '">' . htmlspecialchars($acc->status) . '</span></td>';
+            $statusbadges = ['reopened' => 'info', 'locked' => 'danger', 'submitted' => 'success'];
+            $statusbadge = $statusbadges[$acc->status] ?? 'secondary';
+            echo '<td><span class="badge badge-' . $statusbadge . '">' . htmlspecialchars($acc->status) . '</span></td>';
             echo '<td>' . (int)$acc->currentattempt . '</td>';
             echo '<td>' . ($acc->unlockexpiry ? userdate($acc->unlockexpiry) : '-') . '</td>';
-            echo '<td>' . ($acc->approvalgranted ? '<span class="badge badge-success">Yes</span>' : '<span class="badge badge-secondary">No</span>') . '</td>';
+            echo '<td>' . ($acc->approvalgranted ? $yesbadge : $nobadge) . '</td>';
             echo '<td>';
             // Override buttons.
-            $base_params = ['action' => 'override', 'sesskey' => sesskey(), 'studentid' => $acc->studentid, 'assignid_ov' => $acc->assignid, 'tab' => 'access'];
-            foreach ([
+            $baseparams = [
+                'action' => 'override',
+                'sesskey' => sesskey(),
+                'studentid' => $acc->studentid,
+                'assignid_ov' => $acc->assignid,
+                'tab' => 'access',
+            ];
+            foreach (
+                [
                 'reopen'  => get_string('override_reopen', 'local_paymentunlockassign'),
                 'extend'  => get_string('override_extend', 'local_paymentunlockassign'),
                 'lock'    => get_string('override_lock', 'local_paymentunlockassign'),
                 'approve' => get_string('override_approve', 'local_paymentunlockassign'),
-            ] as $ov_type => $ov_label) {
-                $p = $base_params;
-                $p['override_type'] = $ov_type;
+                ] as $ovtype => $ovlabel
+            ) {
+                $p = $baseparams;
+                $p['override_type'] = $ovtype;
                 $p['reason'] = 'Admin override';
-                if ($ov_type === 'extend') {
+                if ($ovtype === 'extend') {
                     $p['extra_days'] = 7;
                 }
                 $url = new moodle_url('/local/paymentunlockassign/manage.php', $p);
-                $btn_class = $ov_type === 'lock' ? 'btn-danger' : 'btn-secondary';
-                echo '<a href="' . $url->out(false) . '" class="btn btn-sm ' . $btn_class . ' payunlock-ov-btn" onclick="return confirm(\'Apply override: ' . $ov_type . '?\')">' . $ov_label . '</a> ';
+                $btnclass = $ovtype === 'lock' ? 'btn-danger' : 'btn-secondary';
+                echo '<a href="' . $url->out(false) . '" class="btn btn-sm ' . $btnclass . ' payunlock-ov-btn"'
+                    . ' onclick="return confirm(\'Apply override: ' . $ovtype . '?\')">' . $ovlabel . '</a> ';
             }
             echo '</td>';
             echo '</tr>';
@@ -420,7 +477,7 @@ if ($tab === 'access') {
     echo '</div>';
 }
 
-// ---- PAYMENTS TAB ----
+// Payments tab.
 if ($tab === 'payments') {
     $sql = 'SELECT pup.*, u.firstname, u.lastname, a.name AS assignname, c.fullname AS coursename
             FROM {local_payunlock_payments} pup
@@ -430,14 +487,14 @@ if ($tab === 'payments') {
             JOIN {course} c ON c.id = cm.course
             WHERE pup.status = :status
             ORDER BY pup.timepaid DESC';
-    $payments_list = $DB->get_records_sql($sql, ['status' => 'success']);
+    $paymentslist = $DB->get_records_sql($sql, ['status' => 'success']);
 
     // Revenue totals by currency.
-    $revenue_sql = 'SELECT currency, SUM(amount) AS total, COUNT(*) AS cnt
+    $revenuesql = 'SELECT currency, SUM(amount) AS total, COUNT(*) AS cnt
                     FROM {local_payunlock_payments}
                     WHERE status = :status
                     GROUP BY currency';
-    $revenue = $DB->get_records_sql($revenue_sql, ['status' => 'success']);
+    $revenue = $DB->get_records_sql($revenuesql, ['status' => 'success']);
 
     echo '<div class="payunlock-card">';
     echo '<h3>' . get_string('tab_payments', 'local_paymentunlockassign') . '</h3>';
@@ -453,7 +510,7 @@ if ($tab === 'payments') {
         echo '</div>';
     }
 
-    if (empty($payments_list)) {
+    if (empty($paymentslist)) {
         echo '<p>' . get_string('nopayments', 'local_paymentunlockassign') . '</p>';
     } else {
         echo '<table class="table">';
@@ -465,7 +522,7 @@ if ($tab === 'payments') {
             . '<th>' . get_string('paid_at', 'local_paymentunlockassign') . '</th>'
             . '<th>' . get_string('invoice', 'local_paymentunlockassign') . '</th></tr></thead>';
         echo '<tbody>';
-        foreach ($payments_list as $p) {
+        foreach ($paymentslist as $p) {
             echo '<tr>';
             echo '<td>' . fullname($p) . '</td>';
             echo '<td>' . format_string($p->assignname) . '</td>';
@@ -481,14 +538,14 @@ if ($tab === 'payments') {
     echo '</div>';
 }
 
-// ---- AUDIT TAB ----
+// Audit log tab.
 if ($tab === 'audit') {
-    $audit_records = $DB->get_records('local_payunlock_audit', null, 'timecreated DESC', '*', 0, 100);
+    $auditrecords = $DB->get_records('local_payunlock_audit', null, 'timecreated DESC', '*', 0, 100);
 
     echo '<div class="payunlock-card">';
     echo '<h3>' . get_string('tab_audit', 'local_paymentunlockassign') . '</h3>';
 
-    if (empty($audit_records)) {
+    if (empty($auditrecords)) {
         echo '<p>' . get_string('noaudit', 'local_paymentunlockassign') . '</p>';
     } else {
         echo '<table class="table">';
@@ -498,7 +555,7 @@ if ($tab === 'audit') {
             . '<th>Assign ID</th>'
             . '<th>' . get_string('data', 'local_paymentunlockassign') . '</th></tr></thead>';
         echo '<tbody>';
-        foreach ($audit_records as $log) {
+        foreach ($auditrecords as $log) {
             echo '<tr>';
             echo '<td>' . userdate($log->timecreated) . '</td>';
             echo '<td><code>' . htmlspecialchars($log->eventtype) . '</code></td>';

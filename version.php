@@ -17,6 +17,28 @@
 /**
  * Payment Unlock Assignment - version info
  *
+ * v1.2.8: RELEASE PACKAGING. No functional or DB schema changes since v1.2.7 apart from
+ *           FIX-PUA-HIDEBTN (hide Moodle's single_button "Add submission" form for locked
+ *           students), FIX-PUA-LOCKDATEFORM (custom lock date picker bound to the settings
+ *           form, not the navbar Edit mode form) and an explicit capability check on
+ *           student.php. Full GPL v3
+ *           LICENSE, complete README and Keep-a-Changelog CHANGELOG added. New version
+ *           number because a v1.2.7 ZIP with different bytes was already submitted.
+ *
+ * v1.2.7: GO-LIVE SAFETY RELEASE. No DB schema changes.
+ *           FIX-PUA-NOFREEWINDOW — removed automatic user-override creation between due
+ *           date and cut-off (unnecessary in Moodle core; removed late flag; persisted
+ *           after disable; pinned students to stale cut-offs).
+ *           FIX-PUA-EXTENSION — Moodle "Grant extension" dates are now honoured.
+ *           FIX-PUA-SUBMITTED — students whose latest attempt is submitted and awaiting
+ *           marking never see the paywall and cannot pay.
+ *           FIX-PUA-LICENCECACHE — licence check cached site-wide for 12h (7-day grace on
+ *           outage), 5s timeout, only called when the paywall would be shown, no longer
+ *           closes the user session.
+ *           FIX-PUA-LOCKSAFE — admin "Lock" only deletes overrides the plugin created for a
+ *           paid/admin reopen; teacher overrides are preserved.
+ *           FIX-PUA-PAIDONLY — webhook only unlocks sessions with payment_status = paid.
+ *
  * v1.2.2: FIX-PUA-GROUPGUARD — extracted local_paymentunlockassign_has_group_overrides()
  *           as a named function (was inlined in ensure_free_window_override()). Now also
  *           emits an audit log entry when the free window override is skipped.
@@ -30,7 +52,7 @@
  *           No DB schema changes.
  *
  * v1.2.1: FIX-PUA-OVERRIDES (student.php missed) — student.php:70 was calling
- *           get_lockdate($assign_record) instead of get_lockdate($dates). The two
+ *           get_lockdate($assignrecord) instead of get_lockdate($dates). The two
  *           types are duck-type identical so PHP silently passed — but on a
  *           group-override assignment (base dates = 0) student.php derived 'locked'
  *           while both hooks derived 'available', splitting the plugin's behaviour.
@@ -55,7 +77,7 @@
  *           RTO pattern) was evaluated against the wrong dates — on BSBLDR811-style
  *           assignments where base dates are zero, every student was permanently
  *           locked the moment the plugin was enabled. New function:
- *           local_paymentunlockassign_get_effective_dates($assign_record, $userid,
+ *           local_paymentunlockassign_get_effective_dates($assignrecord, $userid,
  *           $courseid). get_lockdate() now takes the resolved $dates object. Both
  *           hook call sites (before_http_headers and before_footer) updated.
  *           FIX-PUA-FREEWINDOW override creation now also uses effective cut-off
@@ -146,14 +168,14 @@
  *
  * @package    local_paymentunlockassign
  * @copyright  2026 EssayGraderAI
- * @license    http://www.gnu.org/copyleft/gpl.html GNU GPL v3 or later
+ * @license    https://www.gnu.org/copyleft/gpl.html GNU GPL v3 or later
  */
 
 defined('MOODLE_INTERNAL') || die();
 
 $plugin->component = 'local_paymentunlockassign';
-$plugin->version   = 2026072300;
-$plugin->release   = '1.2.6';
-$plugin->requires  = 2022041900;
-$plugin->supported = [400, 500];
+$plugin->version   = 2026110200;
+$plugin->release   = '1.2.8';
+$plugin->requires  = 2024042200; // Moodle 4.4+: output hooks used in db/hooks.php.
+$plugin->supported = [404, 500];
 $plugin->maturity  = MATURITY_STABLE;
